@@ -9,11 +9,8 @@ description = "Models helping the MothMonitor project V2"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-  "imagesize",
-  "marimo>=0.17.0",
-  "matplotlib>=3.10.7",
+  "imagesize>=1.4.1",
   "scikit-image>=0.25.2",
-  "tkinter",
   "tqdm>=4.67.1",
 ]
 
@@ -26,8 +23,6 @@ module-name = "moth"
 
 [tool.ruff]
 exclude = ["notebooks/*"]
-
-target-version = "py313"
 
 show-fixes = true
 
