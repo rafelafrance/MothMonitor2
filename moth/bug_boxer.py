@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
 import json
+import re
 import tkinter as tk
-from asyncio.unix_events import EventLoop
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from tkinter import Event, filedialog, messagebox, ttk
@@ -11,7 +11,7 @@ import imagesize
 from PIL import ImageTk
 
 FONT = ("liberation sans", 16)
-FONT_SM = ("liberation sans", 14)
+FONT_SM = ("liberation sans", 12)
 RADIO_STYLE = {"foreground": "white", "font": FONT}
 COLOR = {"moth": "red", "not_moth": "blue", "unsure": "green"}
 
@@ -146,6 +146,7 @@ class App(tk.Tk):
         self.file_label = ttk.Label(
             self.control_frame, text="", font=FONT_SM, wraplength=300
         )
+        self.validate_cmd = (self.register(self.validate_spinner), "%P")
         self.spinner = ttk.Spinbox(
             self.control_frame,
             textvariable=self.image_no,
@@ -154,6 +155,9 @@ class App(tk.Tk):
             justify="center",
             state="disabled",
             command=self.display_image,
+            takefocus=False,
+            validate="all",
+            validatecommand=self.validate_cmd,
         )
         self.content_label = ttk.Label(self.control_frame, text="Bug type:", font=FONT)
 
@@ -207,6 +211,16 @@ class App(tk.Tk):
         self.unsure_radio.grid(row=8, sticky="w", padx=32, pady=8)
 
         self.bind("<Key>", self.on_key)
+
+    def validate_spinner(self, value: str) -> bool:
+        if not value.isdigit():
+            return False
+        no = int(value)
+        ok = no >= 1 and no <= len(self.images)
+        if ok:
+            self.image_no.set(no)
+            self.display_image()
+        return ok
 
     def next_image(self) -> None:
         if not self.images:
