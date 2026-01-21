@@ -2,6 +2,7 @@
 
 import json
 import tkinter as tk
+from asyncio.unix_events import EventLoop
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from tkinter import Event, filedialog, messagebox, ttk
@@ -43,21 +44,21 @@ class Box:
 @dataclass
 class Image:
     path: str
+    width: int = 0  # It's just easier to have this here
+    height: int = 0  # It's just easier to have this here
     boxes: list[Box] = field(default_factory=list)
 
     def filter_size(self) -> None:
         self.boxes = [b for b in self.boxes if not b.too_small()]
 
     def delete_box(self, x: int, y: int) -> None:
-        hits = [b for b in self.boxes if b.point_hit(x, y)]
-
-        if hits:
+        if hits := [b for b in self.boxes if b.point_hit(x, y)]:
             hits = sorted(hits, key=lambda b: b.area())
             self.boxes = [b for b in self.boxes if b != hits[0]]
 
     @classmethod
     def load_json(cls, data: dict) -> "Image":
-        image = cls(path=data["path"])
+        image = cls(path=data["path"], width=data["width"], height=data["height"])
         image.boxes = [
             Box(b["content"], b["x0"], b["y0"], b["x1"], b["y1"], b["id_"])
             for b in data["boxes"]
@@ -74,9 +75,10 @@ class App(tk.Tk):
         self.dragging = False
 
         self.photo = None
-        self.images: list[Image] = []
 
+        self.images: list[Image] = []
         self.image_no = tk.IntVar()
+
         self.content = tk.StringVar(value="moth")
 
         self.title("Create bounding boxes around insects on images.")
@@ -141,7 +143,9 @@ class App(tk.Tk):
         self.save_button = tk.Button(
             self.control_frame, text="Save JSON", font=FONT, command=self.save
         )
-        self.file_label = ttk.Label(self.control_frame, text="", font=FONT_SM)
+        self.file_label = ttk.Label(
+            self.control_frame, text="", font=FONT_SM, wraplength=300
+        )
         self.spinner = ttk.Spinbox(
             self.control_frame,
             textvariable=self.image_no,
@@ -204,6 +208,24 @@ class App(tk.Tk):
 
         self.bind("<Key>", self.on_key)
 
+    def next_image(self) -> None:
+        if not self.images:
+            return
+        no = self.image_no.get()
+        no = min(no + 1, len(self.images))
+        self.image_no.set(no)
+
+    def prev_image(self) -> None:
+        if not self.images:
+            return
+        no = self.image_no.get()
+        no = max(no - 1, 1)
+        no = 0 if not self.images else no
+        self.image_no.set(no)
+
+    def get_image_rec(self) -> Image:
+        return self.images[self.image_no.get() - 1]
+
     def on_key(self, event: Event) -> None:
         match event.keysym:
             case "m" | "M":
@@ -212,19 +234,11 @@ class App(tk.Tk):
                 self.content.set("not_moth")
             case "u" | "U":
                 self.content.set("unsure")
-            case "Left" | "Down":
-                if self.image_no.get() == 0:
-                    return
-                index = self.image_no.get() - 1
-                index = index if index > 0 else len(self.images) - 1
-                self.image_no.set(index)
+            case "Left" | "Down" | "a" | "A" | "h" | "H":
+                self.prev_image()
                 self.display_image()
-            case "Right" | "Up":
-                if self.image_no.get() == 0:
-                    return
-                index = self.image_no.get() + 1
-                index = index if index <= len(self.images) else 1
-                self.image_no.set(index)
+            case "Right" | "Up" | "g" | "G" | "l" | "L":
+                self.next_image()
                 self.display_image()
             case "q" | "Q" | "Escape":
                 self.safe_quit()
@@ -249,14 +263,15 @@ class App(tk.Tk):
         self.curr_dir = Path(image_dir)
         self.dirty = False
 
-        self.images = [
-            Image(path=str(p))
-            for p in sorted(self.curr_dir.glob("*"))
-            if p.suffix.lower() in (".png", ".jpg", ".jpeg")
-        ]
+        for path in sorted(self.curr_dir.glob("*")):
+            if path.suffix.lower() in (".png", ".jpg", ".jpeg"):
+                width, height = imagesize.get(path)
+                self.images.append(
+                    Image(path=str(path), width=int(width), height=int(height))
+                )
 
         if self.images:
-            self.spinner_setup(len(self.images))
+            self.spinner_setup()
             self.save_button.configure(state="normal")
             self.display_image()
         else:
@@ -266,24 +281,29 @@ class App(tk.Tk):
             self.file_label.configure(text="")
 
     def display_image(self) -> None:
-        image_rec: Image = self.images[self.image_no.get() - 1]
+        image_rec: Image = self.get_image_rec()
         self.file_label.configure(text=Path(image_rec.path).name)
         self.photo = ImageTk.PhotoImage(file=image_rec.path)
         self.canvas.create_image(0, 0, anchor="nw", image=self.photo)
-        width, height = imagesize.get(image_rec.path)
-        self.canvas["scrollregion"] = (0, 0, width, height)
+        self.canvas["scrollregion"] = (0, 0, image_rec.width, image_rec.height)
         self.display_image_boxes(image_rec)
+
+    def clamp(self, event: Event, image_rec: Image) -> tuple[int, int]:
+        x = max(self.canvas.canvasx(event.x), 0)
+        x = min(x, image_rec.width - 1)
+        y = max(self.canvas.canvasy(event.y), 0)
+        y = min(y, image_rec.height - 1)
+        return x, y
 
     def on_box_start(self, event: Event) -> None:
         if not self.images:
             return
 
-        x = self.canvas.canvasx(event.x)
-        y = self.canvas.canvasy(event.y)
+        image_rec: Image = self.get_image_rec()
+        x, y = self.clamp(event, image_rec)
 
         content = self.content.get()
         color = COLOR[content]
-        image_rec: Image = self.images[self.image_no.get()]
         id_ = self.canvas.create_rectangle(
             0, 0, 1, 1, outline=color, width=4, tags=("box", content)
         )
@@ -294,24 +314,23 @@ class App(tk.Tk):
 
     def on_box_draw(self, event: Event) -> None:
         if self.dragging and self.images:
-            image_rec: Image = self.images[self.image_no.get()]
+            image_rec: Image = self.get_image_rec()
             box = image_rec.boxes[-1]
-            box.x1 = self.canvas.canvasx(event.x)
-            box.y1 = self.canvas.canvasy(event.y)
+            box.x1, box.y1 = self.clamp(event, image_rec)
             self.canvas.coords(box.id_, box.x0, box.y0, box.x1, box.y1)
 
     def on_box_done(self, _: Event) -> None:
         if self.dragging and self.images:
-            image_rec: Image = self.images[self.image_no.get()]
+            image_rec: Image = self.get_image_rec()
             image_rec.filter_size()
             self.dragging = False
             self.display_image_boxes(image_rec)
 
     def on_box_delete(self, event: Event) -> None:
-        image_rec: Image = self.images[self.image_no.get()]
+        image_rec: Image = self.get_image_rec()
 
-        x = self.canvas.canvasx(event.x)
-        y = self.canvas.canvasy(event.y)
+        x = self.canvas.canvasx(event.x)  # Not clamped so clicks out of bounds do...
+        y = self.canvas.canvasy(event.y)  # not delete a bbox
 
         self.dirty = True
         image_rec.delete_box(x, y)
@@ -376,7 +395,7 @@ class App(tk.Tk):
                 page = Image.load_json(data)
                 self.pages.append(page)
 
-            self.spinner_setup(len(self.pages))
+            self.spinner_setup()
             self.save_button.configure(state="normal")
             self.display_image()
 
@@ -389,11 +408,11 @@ class App(tk.Tk):
             self.spinner_clear()
             self.canvas.delete("all")
 
-    def spinner_setup(self, high: int) -> None:
+    def spinner_setup(self) -> None:
         self.image_no.set(1)
         self.spinner.configure(state="normal")
         self.spinner.configure(from_=1)
-        self.spinner.configure(to=high)
+        self.spinner.configure(to=len(self.images))
 
     def spinner_clear(self) -> None:
         self.image_no.set(0)

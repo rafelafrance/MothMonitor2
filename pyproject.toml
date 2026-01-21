@@ -9,13 +9,31 @@ description = "Models helping the MothMonitor project V2"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+  "accelerate>=1.12.0",
+  "albumentations>=2.0.8",
+  "datasets>=4.5.0",
   "imagesize>=1.4.1",
+  "pycocotools>=2.0.11",
   "scikit-image>=0.25.2",
+  "timm>=1.0.24",
+  "torchmetrics>=1.8.2",
   "tqdm>=4.67.1",
+  "transformers>=4.57.6",
 ]
 
 [dependency-groups]
 dev = ["pre-commit>=4.3.0", "uv-build>=0.9.3"]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-rocm" }]
+torchvision = [{ index = "pytorch-rocm" }]
+pytorch-triton-rocm = [{ index = "pytorch-rocm" }]
+
+# uv pip install --upgrade --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/rocm7.0
+[[tool.uv.index]]
+name = "pytorch-rocm"
+url = "https://download.pytorch.org/whl/nightly/rocm7.0"
+explicit = true
 
 [tool.uv.build-backend]
 module-root = "."
@@ -52,6 +70,7 @@ ignore = [
   "G004",    # Logging statement uses f-string
   "LOG015",  # Use own logger instead
   "N818",    # Exception name {name} should be named with an Error suffix
+  "PTH207",  # Replace `glob` with `Path.glob` or `Path.rglob`
   "PD901",   # Avoid using the generic variable name df for DataFrames
   "PLR0913", # Too many arguments in function definition ({c_args} > {max_args})
   "PLW2901", # Outer {outer_kind} variable {name} overwritten by inner {inner_kind} target
@@ -59,6 +78,7 @@ ignore = [
   "RET504",  # Unnecessary assignment to {name} before return statement
   "RUF001",  # Ambiguous quote character in string
   "RUF002",  # Docstring contains ambiguous `‘`
+  "S311",    # Standard pseudo-random generators are not suitable for cryptographic purposes
   "S602",    # subprocess` call with `shell=True` identified, security issue
   "S607",    # Starting a process with a partial executable path
   "SIM114",  # Combine if branches using logical or operator
