@@ -100,7 +100,7 @@ def count_action(args: argparse.Namespace) -> None:
     console.print(table)
 
 
-def split_action(args: argparse.Namespace) -> None:
+def hf_action(args: argparse.Namespace) -> None:
     with args.bbox_json.open() as f:
         all_images = json.load(f)
 
@@ -122,7 +122,10 @@ def split_action(args: argparse.Namespace) -> None:
     }
 
     for split, images in image_splits.items():
-        split = {"images": [], "annotations": []}
+        split = {
+            "images": [],
+            "objects": {"area": [], "bbox": [], "category": [], "id": []},
+        }
         for image in images:
             split["images"].append(
                 {
@@ -264,12 +267,13 @@ def parse_args() -> argparse.Namespace:
     count_parser.set_defaults(func=count_action)
 
     # ------------------------------------------------------------
-    split_parser = subparsers.add_parser(
+    hf_parser = subparsers.add_parser(
         "split",
-        help="""Format and split images into test, valid, and test datasets.""",
+        help="""Format and split images into test, valid, and test datasets
+            using the Hugging Face format for the detr model.""",
     )
 
-    split_parser.add_argument(
+    hf_parser.add_argument(
         "--bbox-json",
         type=Path,
         required=True,
@@ -277,15 +281,18 @@ def parse_args() -> argparse.Namespace:
         help="""Use this JSON file as the input.""",
     )
 
-    split_parser.add_argument(
-        "--split-dir",
+    hf_parser.add_argument(
+        "--base-path",
         type=Path,
         required=True,
         metavar="PATH",
-        help="""Output to this directory.""",
+        help="""Output the training, validation, and testing JSON files using
+            this as this as the base path. The final paths will look like:
+            <base-path>_train.json, <base-path>_valid.json, and
+            <base-path>_test.json""",
     )
 
-    split_parser.add_argument(
+    hf_parser.add_argument(
         "--train-fract",
         type=float,
         default=0.6,
@@ -294,7 +301,7 @@ def parse_args() -> argparse.Namespace:
             (default: %(default)s)""",
     )
 
-    split_parser.add_argument(
+    hf_parser.add_argument(
         "--test-fract",
         type=float,
         default=0.2,
@@ -303,14 +310,14 @@ def parse_args() -> argparse.Namespace:
             (default: %(default)s)""",
     )
 
-    split_parser.add_argument(
+    hf_parser.add_argument(
         "--seed",
         type=int,
         default=292583,
         help="""Seed for the random number generator. (default: %(default)s)""",
     )
 
-    split_parser.set_defaults(func=split_action)
+    hf_parser.set_defaults(func=hf_action)
     # ------------------------------------------------------------
 
     args = arg_parser.parse_args()

@@ -11,8 +11,24 @@ from PIL import ImageTk
 
 FONT = ("liberation sans", 16)
 FONT_SM = ("liberation sans", 12)
-RADIO_STYLE = {"foreground": "white", "font": FONT}
-COLOR = {"moth": "red", "not_moth": "blue", "unsure": "green"}
+
+STYLES = {
+    "moth": {"background": "red", "foreground": "white", "font": FONT},
+    "not_moth": {"background": "blue", "foreground": "white", "font": FONT},
+    "unsure": {"background": "green", "foreground": "white", "font": FONT},
+    # {"background": "brown", "foreground": "white", "font": FONT},
+    # {"background": "olive", "foreground": "white", "font": FONT},
+    # {"background": "teal", "foreground": "white", "font": FONT},
+    # {"background": "navy", "foreground": "white", "font": FONT},
+    # {"background": "orange", "font": FONT},
+    # {"background": "yellow", "font": FONT},
+    # {"background": "lime", "font": FONT},
+    # {"background": "cyan", "font": FONT},
+    # {"background": "purple", "foreground": "white", "font": FONT},
+    # {"background": "magenta", "foreground": "white", "font": FONT},
+    # {"background": "gray", "font": FONT},
+    # {"background": "lavender", "font": FONT},
+}
 
 SCROLL_DOWN = 5  # Mouse event code for scrolling down
 
@@ -160,54 +176,25 @@ class App(tk.Tk):
         )
         self.content_label = ttk.Label(self.control_frame, text="Bug type:", font=FONT)
 
-        style_name = "moth.TRadiobutton"
-        moth_style = ttk.Style(self)
-        moth_style.configure(
-            style_name, **(RADIO_STYLE | {"background": COLOR["moth"]})
-        )
-        self.moth_radio = ttk.Radiobutton(
-            self.control_frame,
-            text="moth",
-            value="moth",
-            variable=self.content,
-            style=style_name,
-        )
-
-        style_name = "not_moth.TRadiobutton"
-        moth_style = ttk.Style(self)
-        moth_style.configure(
-            style_name, **(RADIO_STYLE | {"background": COLOR["not_moth"]})
-        )
-        self.not_moth_radio = ttk.Radiobutton(
-            self.control_frame,
-            text="not moth",
-            value="not_moth",
-            variable=self.content,
-            style=style_name,
-        )
-
-        style_name = "unsure.TRadiobutton"
-        moth_style = ttk.Style(self)
-        moth_style.configure(
-            style_name, **(RADIO_STYLE | {"background": COLOR["unsure"]})
-        )
-        self.unsure_radio = ttk.Radiobutton(
-            self.control_frame,
-            text="unsure",
-            value="unsure",
-            variable=self.content,
-            style=style_name,
-        )
-
         self.dir_button.grid(row=0, sticky="nsew", padx=16, pady=16)
         self.load_button.grid(row=1, sticky="nsew", padx=16, pady=16)
         self.save_button.grid(row=2, sticky="nsew", padx=16, pady=16)
         self.file_label.grid(row=3, sticky="nsew", padx=16, pady=16)
         self.spinner.grid(row=4, sticky="nsew", padx=16, pady=16)
         self.content_label.grid(row=5, sticky="ew", padx=16, pady=16)
-        self.moth_radio.grid(row=6, sticky="w", padx=32, pady=8)
-        self.not_moth_radio.grid(row=7, sticky="w", padx=32, pady=8)
-        self.unsure_radio.grid(row=8, sticky="w", padx=32, pady=8)
+
+        style = ttk.Style(self)
+        for i, (content_value, opts) in enumerate(STYLES.items(), 6):
+            name = f"{content_value}.TRadiobutton"
+            style.configure(name, **opts)
+            radio = ttk.Radiobutton(
+                self.control_frame,
+                text=content_value.replace("_", " "),
+                value=content_value,
+                variable=self.content,
+                style=name,
+            )
+            radio.grid(row=i, sticky="w", padx=32, pady=8)
 
         self.bind("<Key>", self.on_key)
 
