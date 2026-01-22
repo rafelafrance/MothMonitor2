@@ -303,7 +303,7 @@ class App(tk.Tk):
         x, y = self.clamp(event, image_rec)
 
         content = self.content.get()
-        color = COLOR[content]
+        color = STYLES[content]["background"]
         id_ = self.canvas.create_rectangle(
             0, 0, 1, 1, outline=color, width=4, tags=("box", content)
         )
@@ -346,7 +346,7 @@ class App(tk.Tk):
                 box.x1,
                 box.y1,
                 width=4,
-                outline=COLOR[box.content],
+                outline=STYLES[box.content]["background"],
                 tags=("box", box.content),
             )
 
