@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import json
-import re
 import tkinter as tk
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -329,9 +328,10 @@ class App(tk.Tk):
     def on_box_draw(self, event: Event) -> None:
         if self.dragging and self.images:
             image_rec: Image = self.get_image_rec()
-            box = image_rec.boxes[-1]
-            box.x1, box.y1 = self.clamp(event, image_rec)
-            self.canvas.coords(box.id_, box.x0, box.y0, box.x1, box.y1)
+            if image_rec.boxes:
+                box = image_rec.boxes[-1]
+                box.x1, box.y1 = self.clamp(event, image_rec)
+                self.canvas.coords(box.id_, box.x0, box.y0, box.x1, box.y1)
 
     def on_box_done(self, _: Event) -> None:
         if self.dragging and self.images:
