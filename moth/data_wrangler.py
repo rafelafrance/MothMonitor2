@@ -13,6 +13,8 @@ from rich.console import Console
 from rich.table import Table
 from tqdm import tqdm
 
+from moth.pylib import const
+
 
 def moved_action(args: argparse.Namespace) -> None:
     with args.bbox_json.open() as f:
@@ -82,7 +84,7 @@ def count_action(args: argparse.Namespace) -> None:
     for image in images:
         if len(image["boxes"]) == 0:
             counts["empty"] += 1
-        for content in ("moth", "not_moth", "unsure"):
+        for content in const.BBOX:
             counts[content] += sum(1 for b in image["boxes"] if b["content"] == content)
 
     table = Table(title="Count Box Types")
@@ -91,29 +93,34 @@ def count_action(args: argparse.Namespace) -> None:
 
     table.add_row("Images with boxes", f"{len(images) - counts['empty']:,d}")
     table.add_row("Empty images", f"{counts['empty']:,d}")
+    table.add_row("Total images", f"{len(images):,d}")
     table.add_row("", "")
-    table.add_row("Moth boxes", f"{counts['moth']:,d}")
-    table.add_row("Not moth boxes", f"{counts['not_moth']:,d}")
-    table.add_row("Unsure boxes", f"{counts['unsure']:,d}")
+
+    total = 0
+    for content in const.BBOX:
+        table.add_row(f"{content.title()} boxes", f"{counts[content]:,d}")
+        total += counts[content]
+
+    table.add_row("Total boxes", f"{total:,d}")
 
     console = Console()
     console.print(table)
 
 
-def hf_action(args: argparse.Namespace) -> None:
+def detr_action(args: argparse.Namespace) -> None:
     with args.bbox_json.open() as f:
         all_images = json.load(f)
 
-    all_images = sorted(all_images)
     random.seed(args.seed)
-    all_images = random.shuffle(all_images)
+    random.shuffle(all_images)
 
-    for id_, image in enumerate(all_images):
-        image["id"] = id_
+    # Fake image IDs
+    for id_, image in enumerate(all_images, 1):
+        image["image_id"] = id_
 
     total: int = len(all_images)
     split1: int = round(total * args.train_fract)
-    split2: int = split1 + round(total * args.val_fract)
+    split2: int = split1 + round(total * args.valid_fract)
 
     image_splits: dict[str, list] = {
         "train": all_images[:split1],
@@ -121,22 +128,34 @@ def hf_action(args: argparse.Namespace) -> None:
         "test": all_images[split2:],
     }
 
+    categories = {k: i for i, k in enumerate(const.BBOX)}
+
     for split, images in image_splits.items():
-        split = {
-            "images": [],
-            "objects": {"area": [], "bbox": [], "category": [], "id": []},
-        }
+        records = []
         for image in images:
-            split["images"].append(
-                {
-                    "id": image["id"],
-                    "width": image["width"],
-                    "height": image["height"],
-                    "image_path": image["path"],
-                }
-            )
+            rec = {
+                "image_id": image["image_id"],
+                "width": image["width"],
+                "height": image["height"],
+                "image_path": image["path"],
+                "objects": {"area": [], "bbox": [], "category": [], "id": []},
+            }
             for box in image["boxes"]:
-                bbox = {}
+                width = abs(box["x1"] - box["x0"])
+                height = abs(box["y1"] - box["y0"])
+                left = min(box["x0"], box["x1"])
+                top = min(box["y0"], box["y1"])
+
+                rec["objects"]["id"].append(box["id_"])
+                rec["objects"]["area"].append(width * height)
+                rec["objects"]["category"].append(categories[box["content"]])
+                rec["objects"]["bbox"].append([left, top, width, height])
+
+            records.append(rec)
+
+        path = args.base_path.with_name(f"{args.base_path.stem}_{split}.json")
+        with path.open("w") as f:
+            json.dump(records, f, indent=4)
 
 
 def parse_args() -> argparse.Namespace:
@@ -267,13 +286,13 @@ def parse_args() -> argparse.Namespace:
     count_parser.set_defaults(func=count_action)
 
     # ------------------------------------------------------------
-    hf_parser = subparsers.add_parser(
-        "split",
+    detr_parser = subparsers.add_parser(
+        "detr",
         help="""Format and split images into test, valid, and test datasets
             using the Hugging Face format for the detr model.""",
     )
 
-    hf_parser.add_argument(
+    detr_parser.add_argument(
         "--bbox-json",
         type=Path,
         required=True,
@@ -281,7 +300,7 @@ def parse_args() -> argparse.Namespace:
         help="""Use this JSON file as the input.""",
     )
 
-    hf_parser.add_argument(
+    detr_parser.add_argument(
         "--base-path",
         type=Path,
         required=True,
@@ -292,7 +311,7 @@ def parse_args() -> argparse.Namespace:
             <base-path>_test.json""",
     )
 
-    hf_parser.add_argument(
+    detr_parser.add_argument(
         "--train-fract",
         type=float,
         default=0.6,
@@ -301,25 +320,25 @@ def parse_args() -> argparse.Namespace:
             (default: %(default)s)""",
     )
 
-    hf_parser.add_argument(
-        "--test-fract",
+    detr_parser.add_argument(
+        "--valid-fract",
         type=float,
         default=0.2,
         metavar="FLOAT",
-        help="""What fraction of the records to use for test.
+        help="""What fraction of the records to use for validation.
             (default: %(default)s)""",
     )
 
-    hf_parser.add_argument(
+    detr_parser.add_argument(
         "--seed",
         type=int,
         default=292583,
         help="""Seed for the random number generator. (default: %(default)s)""",
     )
 
-    hf_parser.set_defaults(func=hf_action)
-    # ------------------------------------------------------------
+    detr_parser.set_defaults(func=detr_action)
 
+    # ------------------------------------------------------------
     args = arg_parser.parse_args()
     return args
 

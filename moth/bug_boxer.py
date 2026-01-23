@@ -9,26 +9,7 @@ from tkinter import Event, filedialog, messagebox, ttk
 import imagesize
 from PIL import ImageTk
 
-FONT = ("liberation sans", 16)
-FONT_SM = ("liberation sans", 12)
-
-STYLES = {
-    "moth": {"background": "red", "foreground": "white", "font": FONT},
-    "not_moth": {"background": "blue", "foreground": "white", "font": FONT},
-    "unsure": {"background": "green", "foreground": "white", "font": FONT},
-    # {"background": "brown", "foreground": "white", "font": FONT},
-    # {"background": "olive", "foreground": "white", "font": FONT},
-    # {"background": "teal", "foreground": "white", "font": FONT},
-    # {"background": "navy", "foreground": "white", "font": FONT},
-    # {"background": "orange", "font": FONT},
-    # {"background": "yellow", "font": FONT},
-    # {"background": "lime", "font": FONT},
-    # {"background": "cyan", "font": FONT},
-    # {"background": "purple", "foreground": "white", "font": FONT},
-    # {"background": "magenta", "foreground": "white", "font": FONT},
-    # {"background": "gray", "font": FONT},
-    # {"background": "lavender", "font": FONT},
-}
+from moth.pylib import const
 
 SCROLL_DOWN = 5  # Mouse event code for scrolling down
 
@@ -149,24 +130,24 @@ class App(tk.Tk):
         self.dir_button = tk.Button(
             self.control_frame,
             text="Choose image directory",
-            font=FONT,
+            font=const.FONT,
             command=self.get_image_dir,
         )
         self.load_button = tk.Button(
-            self.control_frame, text="Load JSON", font=FONT, command=self.load
+            self.control_frame, text="Load JSON", font=const.FONT, command=self.load
         )
         self.save_button = tk.Button(
-            self.control_frame, text="Save JSON", font=FONT, command=self.save
+            self.control_frame, text="Save JSON", font=const.FONT, command=self.save
         )
         self.file_label = ttk.Label(
-            self.control_frame, text="", font=FONT_SM, wraplength=300
+            self.control_frame, text="", font=const.FONT_SM, wraplength=300
         )
         self.validate_cmd = (self.register(self.validate_spinner), "%P")
         self.spinner = ttk.Spinbox(
             self.control_frame,
             textvariable=self.image_no,
             wrap=True,
-            font=FONT,
+            font=const.FONT,
             justify="center",
             state="disabled",
             command=self.display_image,
@@ -174,7 +155,9 @@ class App(tk.Tk):
             validate="all",
             validatecommand=self.validate_cmd,
         )
-        self.content_label = ttk.Label(self.control_frame, text="Bug type:", font=FONT)
+        self.content_label = ttk.Label(
+            self.control_frame, text="Bug type:", font=const.FONT
+        )
 
         self.dir_button.grid(row=0, sticky="nsew", padx=16, pady=16)
         self.load_button.grid(row=1, sticky="nsew", padx=16, pady=16)
@@ -184,7 +167,7 @@ class App(tk.Tk):
         self.content_label.grid(row=5, sticky="ew", padx=16, pady=16)
 
         style = ttk.Style(self)
-        for i, (content_value, opts) in enumerate(STYLES.items(), 6):
+        for i, (content_value, opts) in enumerate(const.BBOX.items(), 6):
             name = f"{content_value}.TRadiobutton"
             style.configure(name, **opts)
             radio = ttk.Radiobutton(
@@ -303,7 +286,7 @@ class App(tk.Tk):
         x, y = self.clamp(event, image_rec)
 
         content = self.content.get()
-        color = STYLES[content]["background"]
+        color = const.BBOX[content]["background"]
         id_ = self.canvas.create_rectangle(
             0, 0, 1, 1, outline=color, width=4, tags=("box", content)
         )
@@ -346,7 +329,7 @@ class App(tk.Tk):
                 box.x1,
                 box.y1,
                 width=4,
-                outline=STYLES[box.content]["background"],
+                outline=const.BBOX[box.content]["background"],
                 tags=("box", box.content),
             )
 
