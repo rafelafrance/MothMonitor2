@@ -67,6 +67,7 @@ class App(tk.Tk):
         super().__init__()
 
         self.curr_dir: Path = Path()
+        self.json_path: Path = None
         self.dirty = False
         self.dragging = False
 
@@ -137,7 +138,10 @@ class App(tk.Tk):
             self.control_frame, text="Load JSON", font=const.FONT, command=self.load
         )
         self.save_button = tk.Button(
-            self.control_frame, text="Save JSON", font=const.FONT, command=self.save
+            self.control_frame, text="Save", font=const.FONT, command=self.save
+        )
+        self.save_as_button = tk.Button(
+            self.control_frame, text="Save As...", font=const.FONT, command=self.save_as
         )
         self.file_label = ttk.Label(
             self.control_frame, text="", font=const.FONT_SM, wraplength=300
@@ -162,12 +166,13 @@ class App(tk.Tk):
         self.dir_button.grid(row=0, sticky="nsew", padx=16, pady=16)
         self.load_button.grid(row=1, sticky="nsew", padx=16, pady=16)
         self.save_button.grid(row=2, sticky="nsew", padx=16, pady=16)
-        self.file_label.grid(row=3, sticky="nsew", padx=16, pady=16)
-        self.spinner.grid(row=4, sticky="nsew", padx=16, pady=16)
-        self.content_label.grid(row=5, sticky="ew", padx=16, pady=16)
+        self.save_as_button.grid(row=3, sticky="nsew", padx=16, pady=16)
+        self.file_label.grid(row=4, sticky="nsew", padx=16, pady=16)
+        self.spinner.grid(row=5, sticky="nsew", padx=16, pady=16)
+        self.content_label.grid(row=6, sticky="ew", padx=16, pady=16)
 
         style = ttk.Style(self)
-        for i, (content_value, opts) in enumerate(const.BBOX.items(), 6):
+        for i, (content_value, opts) in enumerate(const.BBOX.items(), 7):
             name = f"{content_value}.TRadiobutton"
             style.configure(name, **opts)
             radio = ttk.Radiobutton(
@@ -256,10 +261,12 @@ class App(tk.Tk):
         if self.images:
             self.spinner_setup()
             self.save_button.configure(state="normal")
+            self.save_as_button.configure(state="normal")
             self.display_image()
         else:
             self.spinner_clear()
             self.save_button.configure(state="disabled")
+            self.save_as_button.configure(state="disabled")
             self.canvas.delete("all")
             self.file_label.configure(text="")
 
@@ -334,40 +341,46 @@ class App(tk.Tk):
             )
 
     def save(self) -> None:
+        if not self.json_path:
+            return
+
+        self.curr_dir = self.json_path.parent
+        self.dirty = False
+
+        output = [asdict(i) for i in self.images]
+
+        with self.json_path.open("w") as out_json:
+            json.dump(output, out_json, indent=4)
+
+    def save_as(self) -> None:
         if not self.images:
             return
 
         json_path = filedialog.asksaveasfilename(
             initialdir=self.curr_dir,
-            title="Save image boxes\n\n",
+            title="Save image boxes as...",
             filetypes=(("json", "*.json"), ("all files", "*")),
         )
 
         if not json_path:
             return
 
-        json_path = Path(json_path)
-        self.curr_dir = json_path.parent
-        self.dirty = False
-
-        output = [asdict(i) for i in self.images]
-
-        with json_path.open("w") as out_json:
-            json.dump(output, out_json, indent=4)
+        self.json_path = Path(json_path)
+        self.save()
 
     def load(self) -> None:
         json_path = filedialog.askopenfilename(
             initialdir=self.curr_dir,
-            title="Load image boxes\n\n",
+            title="Load image boxes",
             filetypes=(("json", "*.json"), ("all files", "*")),
         )
         if not json_path:
             return
 
-        json_path = Path(json_path)
-        self.curr_dir = json_path.parent
+        self.json_path = Path(json_path)
+        self.curr_dir = self.json_path.parent
 
-        with json_path.open() as in_json:
+        with self.json_path.open() as in_json:
             json_images = json.load(in_json)
 
         self.dirty = False
@@ -381,6 +394,7 @@ class App(tk.Tk):
 
             self.spinner_setup()
             self.save_button.configure(state="normal")
+            self.save_as_button.configure(state="normal")
             self.display_image()
 
         except KeyError:
@@ -389,6 +403,7 @@ class App(tk.Tk):
             )
             self.images = []
             self.save_button.configure(state="disabled")
+            self.save_as_button.configure(state="disabled")
             self.spinner_clear()
             self.canvas.delete("all")
 

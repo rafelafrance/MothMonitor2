@@ -8,7 +8,7 @@ import textwrap
 from pathlib import Path
 
 import imagesize
-from PIL import Image
+from PIL import Image, ImageDraw
 from rich.console import Console
 from rich.table import Table
 from tqdm import tqdm
@@ -69,6 +69,8 @@ def sample_action(args: argparse.Namespace) -> None:
             args.sample_dir / f"{parent}_{path.stem}_left_{left}_top_{top}{path.suffix}"
         )
         cropped.save(name)
+
+        image.close()
 
 
 def count_action(args: argparse.Namespace) -> None:
@@ -156,6 +158,34 @@ def detr_action(args: argparse.Namespace) -> None:
         path = args.base_path.with_name(f"{args.base_path.stem}_{split}.json")
         with path.open("w") as f:
             json.dump(records, f, indent=4)
+
+
+def pics_action(args: argparse.Namespace) -> None:
+    args.pics_dir.mkdir(parents=True, exist_ok=True)
+
+    with args.bbox_json.open() as f:
+        images = json.load(f)
+
+    images = sorted(images, key=lambda i: i["path"])
+    images = images[: args.limit]
+
+    for rec in tqdm(images):
+        with Image.open(rec["path"]) as image:
+            draw = ImageDraw.Draw(image)
+
+            for box in rec["boxes"]:
+                x0 = min(box["x0"], box["x1"])
+                x1 = max(box["x0"], box["x1"])
+                y0 = min(box["y0"], box["y1"])
+                y1 = max(box["y0"], box["y1"])
+                draw.rectangle(
+                    [(x0, y0), (x1, y1)],
+                    outline=const.BBOX[box["content"]]["background"],
+                    width=4,
+                )
+
+            path = args.pics_dir / Path(rec["path"]).name
+            image.save(path)
 
 
 def parse_args() -> argparse.Namespace:
@@ -337,6 +367,38 @@ def parse_args() -> argparse.Namespace:
     )
 
     detr_parser.set_defaults(func=detr_action)
+
+    # ------------------------------------------------------------
+    pics_parser = subparsers.add_parser(
+        "pics",
+        help="""Output images with the boxes drawn on them.""",
+    )
+
+    pics_parser.add_argument(
+        "--bbox-json",
+        type=Path,
+        required=True,
+        metavar="PATH",
+        help="""Use this JSON file as the input.""",
+    )
+
+    pics_parser.add_argument(
+        "--pics-dir",
+        type=Path,
+        required=True,
+        metavar="PATH",
+        help="""Output the images with boxes to this directory.""",
+    )
+
+    pics_parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        metavar="INT",
+        help="""Limit the number of images make. (default: %(default)s)""",
+    )
+
+    pics_parser.set_defaults(func=pics_action)
 
     # ------------------------------------------------------------
     args = arg_parser.parse_args()
