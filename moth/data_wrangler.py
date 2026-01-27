@@ -16,26 +16,20 @@ from tqdm import tqdm
 from moth.pylib import util
 
 
-def moved_action(args: argparse.Namespace) -> None:
-    with args.bbox_json.open() as f:
-        images = json.load(f)
-
-    for image in images:
-        old = Path(image["path"])
-        new = args.new_dir / old.name
-        image["path"] = str(new)
-
-    with args.bbox_json.open("w") as f:
-        json.dump(images, f, indent=4)
-
-
 def fix_action(args: argparse.Namespace) -> None:
     with args.bbox_json.open() as f:
         images = json.load(f)
 
     for i, image in enumerate(images):
-        image_id = image.get("image_id", f"{i:04d}")
-        image["image_id"] = image_id
+        if args.id_prefix:
+            image_id = f"{args.id_prefix}{i:04d}"
+            image["image_id"] = image_id
+            print(image_id)
+
+        if args.new_dir:
+            old = Path(image["path"])
+            new = args.new_dir / old.name
+            image["path"] = str(new)
 
         if args.rename:
             src = Path(image["path"])
@@ -207,7 +201,8 @@ def parse_args() -> argparse.Namespace:
     # ------------------------------------------------------------
     fix_parser = subparsers.add_parser(
         "fix",
-        help="""Edit the bounding box JSON file.""",
+        help="""Edit the bounding box JSON file. Update the directory, rename files,
+            update image IDs.""",
     )
 
     fix_parser.add_argument(
@@ -219,18 +214,19 @@ def parse_args() -> argparse.Namespace:
     )
 
     fix_parser.add_argument(
-        "--new-dir",
-        type=Path,
-        required=True,
-        metavar="PATH",
-        help="""You moved the images to a new directory, possibly to a new computer,
-            now update the bug bounding box JSON file to this new directory.""",
+        "--id-prefix",
+        type=int,
+        metavar="INT",
+        help="""Use this as a prefix for new image IDs. It's an easy way to avoid
+            file name conflicts. For some odd reason integers seem to be required.""",
     )
 
     fix_parser.add_argument(
-        "--image-id",
-        action="store_true",
-        help="""Update image IDs.""",
+        "--new-dir",
+        type=Path,
+        metavar="PATH",
+        help="""You moved the images to a new directory, possibly to a new computer,
+            now update the bug bounding box JSON file to this new directory.""",
     )
 
     fix_parser.add_argument(
