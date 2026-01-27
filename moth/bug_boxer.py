@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python,
 
 import json
 import tkinter as tk
@@ -9,7 +9,7 @@ from tkinter import Event, filedialog, messagebox, ttk
 import imagesize
 from PIL import ImageTk
 
-from moth.pylib import const
+from moth.pylib import util
 
 SCROLL_DOWN = 5  # Mouse event code for scrolling down
 
@@ -54,7 +54,11 @@ class Image:
 
     @classmethod
     def load_json(cls, data: dict) -> "Image":
-        image = cls(path=data["path"], width=data["width"], height=data["height"])
+        image = cls(
+            path=data["path"],
+            width=data["width"],
+            height=data["height"],
+        )
         image.boxes = [
             Box(b["content"], b["x0"], b["y0"], b["x1"], b["y1"], b["id_"])
             for b in data["boxes"]
@@ -131,27 +135,27 @@ class App(tk.Tk):
         self.dir_button = tk.Button(
             self.control_frame,
             text="Choose image directory",
-            font=const.FONT,
+            font=util.FONT,
             command=self.get_image_dir,
         )
         self.load_button = tk.Button(
-            self.control_frame, text="Load JSON", font=const.FONT, command=self.load
+            self.control_frame, text="Load JSON", font=util.FONT, command=self.load
         )
         self.save_button = tk.Button(
-            self.control_frame, text="Save", font=const.FONT, command=self.save
+            self.control_frame, text="Save", font=util.FONT, command=self.save
         )
         self.save_as_button = tk.Button(
-            self.control_frame, text="Save As...", font=const.FONT, command=self.save_as
+            self.control_frame, text="Save As...", font=util.FONT, command=self.save_as
         )
         self.file_label = ttk.Label(
-            self.control_frame, text="", font=const.FONT_SM, wraplength=300
+            self.control_frame, text="", font=util.FONT_SM, wraplength=300
         )
         self.validate_cmd = (self.register(self.validate_spinner), "%P")
         self.spinner = ttk.Spinbox(
             self.control_frame,
             textvariable=self.image_no,
             wrap=True,
-            font=const.FONT,
+            font=util.FONT,
             justify="center",
             state="disabled",
             command=self.display_image,
@@ -160,7 +164,7 @@ class App(tk.Tk):
             validatecommand=self.validate_cmd,
         )
         self.content_label = ttk.Label(
-            self.control_frame, text="Bug type:", font=const.FONT
+            self.control_frame, text="Bug type:", font=util.FONT
         )
 
         self.dir_button.grid(row=0, sticky="nsew", padx=16, pady=16)
@@ -172,7 +176,7 @@ class App(tk.Tk):
         self.content_label.grid(row=6, sticky="ew", padx=16, pady=16)
 
         style = ttk.Style(self)
-        for i, (content_value, opts) in enumerate(const.BBOX.items(), 7):
+        for i, (content_value, opts) in enumerate(util.BBOX.items(), 7):
             name = f"{content_value}.TRadiobutton"
             style.configure(name, **opts)
             radio = ttk.Radiobutton(
@@ -293,7 +297,7 @@ class App(tk.Tk):
         x, y = self.clamp(event, image_rec)
 
         content = self.content.get()
-        color = const.BBOX[content]["background"]
+        color = util.COLOR[content]
         id_ = self.canvas.create_rectangle(
             0, 0, 1, 1, outline=color, width=4, tags=("box", content)
         )
@@ -320,8 +324,8 @@ class App(tk.Tk):
     def on_box_delete(self, event: Event) -> None:
         image_rec: Image = self.get_image_rec()
 
-        x = self.canvas.canvasx(event.x)  # Not clamped so clicks out of bounds do...
-        y = self.canvas.canvasy(event.y)  # not delete a bbox
+        x = self.canvas.canvasx(event.x)  # Not clamped so clicks out of bounds...
+        y = self.canvas.canvasy(event.y)  # do not delete a bbox
 
         self.dirty = True
         image_rec.delete_box(x, y)
@@ -336,7 +340,7 @@ class App(tk.Tk):
                 box.x1,
                 box.y1,
                 width=4,
-                outline=const.BBOX[box.content]["background"],
+                outline=util.COLOR[box.content],
                 tags=("box", box.content),
             )
 

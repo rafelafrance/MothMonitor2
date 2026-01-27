@@ -18,3 +18,7 @@ BBOX = {
     # {"background": "gray", "font": FONT},
     # {"background": "lavender", "font": FONT},
 }
+
+COLOR = {k: v["background"] for k, v in BBOX.items()}
+id2label = dict(enumerate(BBOX))
+label2id = {k: i for i, k in id2label.items()}

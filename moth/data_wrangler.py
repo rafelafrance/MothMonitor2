@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.table import Table
 from tqdm import tqdm
 
-from moth.pylib import const
+from moth.pylib import util
 
 
 def moved_action(args: argparse.Namespace) -> None:
@@ -24,6 +24,24 @@ def moved_action(args: argparse.Namespace) -> None:
         old = Path(image["path"])
         new = args.new_dir / old.name
         image["path"] = str(new)
+
+    with args.bbox_json.open("w") as f:
+        json.dump(images, f, indent=4)
+
+
+def fix_action(args: argparse.Namespace) -> None:
+    with args.bbox_json.open() as f:
+        images = json.load(f)
+
+    for i, image in enumerate(images):
+        image_id = image.get("image_id", f"{i:04d}")
+        image["image_id"] = image_id
+
+        if args.rename:
+            src = Path(image["path"])
+            dst = src.with_stem(image["image_id"])
+            image["path"] = str(dst)
+            src.rename(dst)
 
     with args.bbox_json.open("w") as f:
         json.dump(images, f, indent=4)
@@ -42,35 +60,20 @@ def sample_action(args: argparse.Namespace) -> None:
     random.seed(args.seed)
     images = random.choices(images, k=args.samples)
 
-    for path in tqdm(images):
+    for i, path in tqdm(enumerate(images)):
         width, height = imagesize.get(path)
-        width = int(width * args.scale)
-        height = int(height * args.scale)
+        width, height = int(width * args.scale), int(height * args.scale)
 
-        image = Image.open(path)
+        with Image.open(path) as image:
+            image = image.resize((width, height))
 
-        scaled = image.resize((width, height))
+            left = random.choice(range(width - args.width))
+            top = random.choice(range(height - args.height))
 
-        if width > height:
-            left = random.choice(range(width - args.long_edge))
-            top = random.choice(range(height - args.short_edge))
-            cropped = scaled.crop(
-                (left, top, left + args.long_edge, top + args.short_edge)
-            )
-        else:
-            left = random.choice(range(width - args.short_edge))
-            top = random.choice(range(height - args.long_edge))
-            cropped = scaled.crop(
-                (left, top, left + args.short_edge, top + args.long_edge)
-            )
+            image = image.crop((left, top, left + args.width, top + args.height))
 
-        parent = str(path.parent).replace("/", "_")
-        name = (
-            args.sample_dir / f"{parent}_{path.stem}_left_{left}_top_{top}{path.suffix}"
-        )
-        cropped.save(name)
-
-        image.close()
+            name = args.sample_dir / f"{i:04d}{path.suffix}"
+            image.save(name)
 
 
 def count_action(args: argparse.Namespace) -> None:
@@ -86,7 +89,7 @@ def count_action(args: argparse.Namespace) -> None:
     for image in images:
         if len(image["boxes"]) == 0:
             counts["empty"] += 1
-        for content in const.BBOX:
+        for content in util.BBOX:
             counts[content] += sum(1 for b in image["boxes"] if b["content"] == content)
 
     table = Table(title="Count Box Types")
@@ -99,7 +102,7 @@ def count_action(args: argparse.Namespace) -> None:
     table.add_row("", "")
 
     total = 0
-    for content in const.BBOX:
+    for content in util.BBOX:
         table.add_row(f"{content.title()} boxes", f"{counts[content]:,d}")
         total += counts[content]
 
@@ -117,8 +120,8 @@ def detr_action(args: argparse.Namespace) -> None:
     random.shuffle(all_images)
 
     # Fake image IDs
-    for id_, image in enumerate(all_images, 1):
-        image["image_id"] = id_
+    for i, image in enumerate(all_images):
+        image["image_id"] = f"{i:04d}"
 
     total: int = len(all_images)
     split1: int = round(total * args.train_fract)
@@ -130,8 +133,6 @@ def detr_action(args: argparse.Namespace) -> None:
         "test": all_images[split2:],
     }
 
-    categories = {k: i for i, k in enumerate(const.BBOX)}
-
     for split, images in image_splits.items():
         records = []
         for image in images:
@@ -139,7 +140,7 @@ def detr_action(args: argparse.Namespace) -> None:
                 "image_id": image["image_id"],
                 "width": image["width"],
                 "height": image["height"],
-                "image_path": image["path"],
+                "path": image["path"],
                 "objects": {"area": [], "bbox": [], "category": [], "id": []},
             }
             for box in image["boxes"]:
@@ -150,7 +151,7 @@ def detr_action(args: argparse.Namespace) -> None:
 
                 rec["objects"]["id"].append(box["id_"])
                 rec["objects"]["area"].append(width * height)
-                rec["objects"]["category"].append(categories[box["content"]])
+                rec["objects"]["category"].append(util.label2id[box["content"]])
                 rec["objects"]["bbox"].append([left, top, width, height])
 
             records.append(rec)
@@ -180,7 +181,7 @@ def pics_action(args: argparse.Namespace) -> None:
                 y1 = max(box["y0"], box["y1"])
                 draw.rectangle(
                     [(x0, y0), (x1, y1)],
-                    outline=const.BBOX[box["content"]]["background"],
+                    outline=util.COLOR[box["content"]],
                     width=4,
                 )
 
@@ -204,13 +205,12 @@ def parse_args() -> argparse.Namespace:
     )
 
     # ------------------------------------------------------------
-    moved_parser = subparsers.add_parser(
-        "moved",
-        help="""You moved the images to a new directory, possibly to a new computer,
-            now update the bug bounding box JSON file to this new directory.""",
+    fix_parser = subparsers.add_parser(
+        "fix",
+        help="""Edit the bounding box JSON file.""",
     )
 
-    moved_parser.add_argument(
+    fix_parser.add_argument(
         "--bbox-json",
         type=Path,
         required=True,
@@ -218,15 +218,28 @@ def parse_args() -> argparse.Namespace:
         help="""Edit this JSON file.""",
     )
 
-    moved_parser.add_argument(
+    fix_parser.add_argument(
         "--new-dir",
         type=Path,
         required=True,
         metavar="PATH",
-        help="""You moved the images to this directory.""",
+        help="""You moved the images to a new directory, possibly to a new computer,
+            now update the bug bounding box JSON file to this new directory.""",
     )
 
-    moved_parser.set_defaults(func=moved_action)
+    fix_parser.add_argument(
+        "--image-id",
+        action="store_true",
+        help="""Update image IDs.""",
+    )
+
+    fix_parser.add_argument(
+        "--rename",
+        action="store_true",
+        help="""Rename image files to use the image ID as the stem.""",
+    )
+
+    fix_parser.set_defaults(func=fix_action)
 
     # ------------------------------------------------------------
     sample_parser = subparsers.add_parser(
@@ -264,21 +277,19 @@ def parse_args() -> argparse.Namespace:
     )
 
     sample_parser.add_argument(
-        "--long-edge",
+        "--width",
         type=int,
         default=1333,
         metavar="INT",
-        help="""Randomly crop this size of an area out of the sampled image along the
-            long edge of the image. (default: %(default)s)""",
+        help="""Crop this width of an area out of an image. (default: %(default)s)""",
     )
 
     sample_parser.add_argument(
-        "--short-edge",
+        "--height",
         type=int,
         default=800,
         metavar="INT",
-        help="""Randomly crop this size of an area out of the sampled image along the
-            short edge of the image. (default: %(default)s)""",
+        help="""Crop this height of an area out of an image. (default: %(default)s)""",
     )
 
     sample_parser.add_argument(
@@ -292,7 +303,6 @@ def parse_args() -> argparse.Namespace:
     sample_parser.add_argument(
         "--seed",
         type=int,
-        default=9885303,
         metavar="INT",
         help="""Use this as the random seed.""",
     )
@@ -362,8 +372,7 @@ def parse_args() -> argparse.Namespace:
     detr_parser.add_argument(
         "--seed",
         type=int,
-        default=292583,
-        help="""Seed for the random number generator. (default: %(default)s)""",
+        help="""Seed for the random number generator.""",
     )
 
     detr_parser.set_defaults(func=detr_action)
