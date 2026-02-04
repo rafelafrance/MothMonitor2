@@ -1,69 +1,17 @@
-#!/usr/bin/env python,
+#!/usr/bin/env python
 
 import json
 import tkinter as tk
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
 from pathlib import Path
 from tkinter import Event, filedialog, messagebox, ttk
 
 import imagesize
 from PIL import ImageTk
 
-from moth.pylib import util
+from moth.pylib import bbox
 
 SCROLL_DOWN = 5  # Mouse event code for scrolling down
-
-TOO_SMALL = 20
-
-
-@dataclass
-class Box:
-    content: str
-    x0: int
-    y0: int
-    x1: int
-    y1: int
-    id_: int  # Used by tkinter
-
-    def too_small(self) -> bool:
-        return abs(self.x1 - self.x0) < TOO_SMALL or abs(self.y1 - self.y0) < TOO_SMALL
-
-    def area(self) -> int:
-        return abs(self.x1 - self.x0) * abs(self.y1 - self.y0)
-
-    def point_hit(self, x: int, y: int) -> bool:
-        x0, x1 = (self.x0, self.x1) if self.x1 > self.x0 else (self.x1, self.x0)
-        y0, y1 = (self.y0, self.y1) if self.y1 > self.y0 else (self.y1, self.y0)
-        return x0 <= x <= x1 and y0 <= y <= y1
-
-
-@dataclass
-class Image:
-    path: str
-    width: int = 0  # It's just easier to have this here
-    height: int = 0  # It's just easier to have this here
-    boxes: list[Box] = field(default_factory=list)
-
-    def filter_size(self) -> None:
-        self.boxes = [b for b in self.boxes if not b.too_small()]
-
-    def delete_box(self, x: int, y: int) -> None:
-        if hits := [b for b in self.boxes if b.point_hit(x, y)]:
-            hits = sorted(hits, key=lambda b: b.area())
-            self.boxes = [b for b in self.boxes if b != hits[0]]
-
-    @classmethod
-    def load_json(cls, data: dict) -> "Image":
-        image = cls(
-            path=data["path"],
-            width=data["width"],
-            height=data["height"],
-        )
-        image.boxes = [
-            Box(b["content"], b["x0"], b["y0"], b["x1"], b["y1"], b["id_"])
-            for b in data["boxes"]
-        ]
-        return image
 
 
 class App(tk.Tk):
@@ -71,16 +19,16 @@ class App(tk.Tk):
         super().__init__()
 
         self.curr_dir: Path = Path()
-        self.json_path: Path = None
+        self.bbox_path: Path = None
         self.dirty = False
         self.dragging = False
 
         self.photo = None
 
-        self.images: list[Image] = []
+        self.bbox_images: list[bbox.BBoxImage] = []
         self.image_no = tk.IntVar()
 
-        self.content = tk.StringVar(value="moth")
+        self.bbox_content = tk.StringVar(value="moth")
 
         self.title("Create bounding boxes around insects on images.")
 
@@ -94,14 +42,6 @@ class App(tk.Tk):
         self.columnconfigure(0, weight=1)
         self.columnconfigure(1, weight=0)
 
-        self.configure_canvas_frame()
-        self.configure_control_frame()
-
-        self.protocol("WM_DELETE_WINDOW", self.safe_quit)
-        self.focus()
-        self.unbind_all("<<NextWindow>>")
-
-    def configure_canvas_frame(self) -> None:
         self.h_bar = ttk.Scrollbar(self.canvas_frame, orient=tk.HORIZONTAL)
         self.v_bar = ttk.Scrollbar(self.canvas_frame, orient=tk.VERTICAL)
 
@@ -131,31 +71,39 @@ class App(tk.Tk):
         self.canvas.bind("<Button-4>", self.on_mouse_wheel)
         self.canvas.bind("<Button-5>", self.on_mouse_wheel)
 
-    def configure_control_frame(self) -> None:
         self.dir_button = tk.Button(
             self.control_frame,
             text="Choose image directory",
-            font=util.FONT,
+            font=bbox.FONT,
             command=self.get_image_dir,
         )
         self.load_button = tk.Button(
-            self.control_frame, text="Load JSON", font=util.FONT, command=self.load
+            self.control_frame,
+            text="Load JSON",
+            font=bbox.FONT,
+            command=self.load,
         )
         self.save_button = tk.Button(
-            self.control_frame, text="Save", font=util.FONT, command=self.save
+            self.control_frame,
+            text="Save",
+            font=bbox.FONT,
+            command=self.save,
         )
         self.save_as_button = tk.Button(
-            self.control_frame, text="Save As...", font=util.FONT, command=self.save_as
+            self.control_frame,
+            text="Save As...",
+            font=bbox.FONT,
+            command=self.save_as,
         )
         self.file_label = ttk.Label(
-            self.control_frame, text="", font=util.FONT_SM, wraplength=300
+            self.control_frame, text="", font=bbox.FONT_SM, wraplength=300
         )
         self.validate_cmd = (self.register(self.validate_spinner), "%P")
         self.spinner = ttk.Spinbox(
             self.control_frame,
             textvariable=self.image_no,
             wrap=True,
-            font=util.FONT,
+            font=bbox.FONT,
             justify="center",
             state="disabled",
             command=self.display_image,
@@ -164,7 +112,7 @@ class App(tk.Tk):
             validatecommand=self.validate_cmd,
         )
         self.content_label = ttk.Label(
-            self.control_frame, text="Bug type:", font=util.FONT
+            self.control_frame, text="Bug type:", font=bbox.FONT
         )
 
         self.dir_button.grid(row=0, sticky="nsew", padx=16, pady=16)
@@ -176,56 +124,60 @@ class App(tk.Tk):
         self.content_label.grid(row=6, sticky="ew", padx=16, pady=16)
 
         style = ttk.Style(self)
-        for i, (content_value, opts) in enumerate(util.BBOX.items(), 7):
+        for i, (content_value, opts) in enumerate(bbox.BBOX_FORMAT.items(), 7):
             name = f"{content_value}.TRadiobutton"
             style.configure(name, **opts)
             radio = ttk.Radiobutton(
                 self.control_frame,
                 text=content_value.replace("_", " "),
                 value=content_value,
-                variable=self.content,
+                variable=self.bbox_content,
                 style=name,
             )
             radio.grid(row=i, sticky="w", padx=32, pady=8)
 
         self.bind("<Key>", self.on_key)
 
+        self.protocol("WM_DELETE_WINDOW", self.safe_quit)
+        self.focus()
+        self.unbind_all("<<NextWindow>>")
+
     def validate_spinner(self, value: str) -> bool:
         if not value.isdigit():
             return False
         no = int(value)
-        ok = no >= 1 and no <= len(self.images)
+        ok = 1 <= no <= len(self.bbox_images)
         if ok:
             self.image_no.set(no)
             self.display_image()
         return ok
 
     def next_image(self) -> None:
-        if not self.images:
+        if not self.bbox_images:
             return
         no = self.image_no.get()
-        no = min(no + 1, len(self.images))
+        no = min(no + 1, len(self.bbox_images))
         self.image_no.set(no)
 
     def prev_image(self) -> None:
-        if not self.images:
+        if not self.bbox_images:
             return
         no = self.image_no.get()
         no = max(no - 1, 1)
-        no = 0 if not self.images else no
+        no = 0 if not self.bbox_images else no
         self.image_no.set(no)
 
-    def get_image_rec(self) -> Image:
-        return self.images[self.image_no.get() - 1]
+    def get_image_rec(self) -> bbox.BBoxImage:
+        return self.bbox_images[self.image_no.get() - 1]
 
     def on_key(self, event: Event) -> None:
         match event.keysym:
             case "m" | "M":
-                self.content.set("moth")
+                self.bbox_content.set("moth")
             case "n" | "N":
-                self.content.set("not_moth")
+                self.bbox_content.set("not_moth")
             case "u" | "U":
-                self.content.set("unsure")
+                self.bbox_content.set("unsure")
             case "Left" | "Down" | "a" | "A" | "h" | "H":
                 self.prev_image()
                 self.display_image()
@@ -255,14 +207,15 @@ class App(tk.Tk):
         self.curr_dir = Path(image_dir)
         self.dirty = False
 
+        self.bbox_images = []
         for path in sorted(self.curr_dir.glob("*")):
             if path.suffix.lower() in (".png", ".jpg", ".jpeg"):
                 width, height = imagesize.get(path)
-                self.images.append(
-                    Image(path=str(path), width=int(width), height=int(height))
+                self.bbox_images.append(
+                    bbox.BBoxImage(path=str(path), width=int(width), height=int(height))
                 )
 
-        if self.images:
+        if self.bbox_images:
             self.spinner_setup()
             self.save_button.configure(state="normal")
             self.save_as_button.configure(state="normal")
@@ -275,126 +228,128 @@ class App(tk.Tk):
             self.file_label.configure(text="")
 
     def display_image(self) -> None:
-        image_rec: Image = self.get_image_rec()
-        self.file_label.configure(text=Path(image_rec.path).name)
-        self.photo = ImageTk.PhotoImage(file=image_rec.path)
+        bbox_image: bbox.BBoxImage = self.get_image_rec()
+        self.file_label.configure(text=Path(bbox_image.path).name)
+        self.photo = ImageTk.PhotoImage(file=bbox_image.path)
         self.canvas.create_image(0, 0, anchor="nw", image=self.photo)
-        self.canvas["scrollregion"] = (0, 0, image_rec.width, image_rec.height)
-        self.display_image_boxes(image_rec)
+        self.canvas["scrollregion"] = (0, 0, bbox_image.width, bbox_image.height)
+        self.display_image_boxes(bbox_image)
 
-    def clamp(self, event: Event, image_rec: Image) -> tuple[int, int]:
+    def clamp(self, event: Event, bbox_image: bbox.BBoxImage) -> tuple[int, int]:
         x = max(self.canvas.canvasx(event.x), 0)
-        x = min(x, image_rec.width - 1)
+        x = min(x, bbox_image.width - 1)
         y = max(self.canvas.canvasy(event.y), 0)
-        y = min(y, image_rec.height - 1)
+        y = min(y, bbox_image.height - 1)
         return x, y
 
     def on_box_start(self, event: Event) -> None:
-        if not self.images:
+        if not self.bbox_images:
             return
 
-        image_rec: Image = self.get_image_rec()
-        x, y = self.clamp(event, image_rec)
+        bbox_image: bbox.BBoxImage = self.get_image_rec()
+        x, y = self.clamp(event, bbox_image)
 
-        content = self.content.get()
-        color = util.COLOR[content]
+        bbox_content = self.bbox_content.get()
+        color = bbox.BBOX_COLOR[bbox_content]
         id_ = self.canvas.create_rectangle(
-            0, 0, 1, 1, outline=color, width=4, tags=("box", content)
+            0, 0, 1, 1, outline=color, width=4, tags=("box", bbox_content)
         )
-        image_rec.boxes.append(Box(id_=id_, x0=x, y0=y, x1=x, y1=y, content=content))
+        bbox_image.bboxes.append(
+            bbox.BBox(id_=id_, x0=x, y0=y, x1=x, y1=y, content=bbox_content)
+        )
 
         self.dirty = True
         self.dragging = True
 
     def on_box_draw(self, event: Event) -> None:
-        if self.dragging and self.images:
-            image_rec: Image = self.get_image_rec()
-            if image_rec.boxes:
-                box = image_rec.boxes[-1]
-                box.x1, box.y1 = self.clamp(event, image_rec)
+        if self.dragging and self.bbox_images:
+            bbox_image: bbox.BBoxImage = self.get_image_rec()
+            if bbox_image.bboxes:
+                box = bbox_image.bboxes[-1]
+                box.x1, box.y1 = self.clamp(event, bbox_image)
                 self.canvas.coords(box.id_, box.x0, box.y0, box.x1, box.y1)
 
     def on_box_done(self, _: Event) -> None:
-        if self.dragging and self.images:
-            image_rec: Image = self.get_image_rec()
-            image_rec.filter_size()
+        if self.dragging and self.bbox_images:
+            bbox_image: bbox.BBoxImage = self.get_image_rec()
+            bbox_image.filter_size()
             self.dragging = False
-            self.display_image_boxes(image_rec)
+            self.display_image_boxes(bbox_image)
 
     def on_box_delete(self, event: Event) -> None:
-        image_rec: Image = self.get_image_rec()
+        bbox_image: bbox.BBoxImage = self.get_image_rec()
 
         x = self.canvas.canvasx(event.x)  # Not clamped so clicks out of bounds...
         y = self.canvas.canvasy(event.y)  # do not delete a bbox
 
         self.dirty = True
-        image_rec.delete_box(x, y)
-        self.display_image_boxes(image_rec)
+        bbox_image.delete_box(x, y)
+        self.display_image_boxes(bbox_image)
 
-    def display_image_boxes(self, image_rec: Image) -> None:
+    def display_image_boxes(self, bbox_image: bbox.BBoxImage) -> None:
         self.canvas.delete("box")
-        for box in image_rec.boxes:
+        for box in bbox_image.bboxes:
             self.canvas.create_rectangle(
                 box.x0,
                 box.y0,
                 box.x1,
                 box.y1,
                 width=4,
-                outline=util.COLOR[box.content],
+                outline=bbox.BBOX_COLOR[box.content],
                 tags=("box", box.content),
             )
 
     def save(self) -> None:
-        if not self.json_path:
+        if not self.bbox_path:
             return
 
-        self.curr_dir = self.json_path.parent
+        self.curr_dir = self.bbox_path.parent
         self.dirty = False
 
-        output = [asdict(i) for i in self.images]
+        output = [asdict(i) for i in self.bbox_images]
 
-        with self.json_path.open("w") as out_json:
+        with self.bbox_path.open("w") as out_json:
             json.dump(output, out_json, indent=4)
 
     def save_as(self) -> None:
-        if not self.images:
+        if not self.bbox_images:
             return
 
-        json_path = filedialog.asksaveasfilename(
+        bbox_path = filedialog.asksaveasfilename(
             initialdir=self.curr_dir,
             title="Save image boxes as...",
             filetypes=(("json", "*.json"), ("all files", "*")),
         )
 
-        if not json_path:
+        if not bbox_path:
             return
 
-        self.json_path = Path(json_path)
+        self.bbox_path = Path(bbox_path)
         self.save()
 
     def load(self) -> None:
-        json_path = filedialog.askopenfilename(
+        bbox_path = filedialog.askopenfilename(
             initialdir=self.curr_dir,
             title="Load image boxes",
             filetypes=(("json", "*.json"), ("all files", "*")),
         )
-        if not json_path:
+        if not bbox_path:
             return
 
-        self.json_path = Path(json_path)
-        self.curr_dir = self.json_path.parent
+        self.bbox_path = Path(bbox_path)
+        self.curr_dir = self.bbox_path.parent
 
-        with self.json_path.open() as in_json:
+        with self.bbox_path.open() as in_json:
             json_images = json.load(in_json)
 
         self.dirty = False
-        self.pages = []
+        self.bbox_images = []
 
         try:
-            self.images = [Image.load_json(i) for i in json_images]
+            self.bbox_images = [bbox.BBoxImage.load_json(i) for i in json_images]
             for data in json_images:
-                page = Image.load_json(data)
-                self.pages.append(page)
+                bbox_image = bbox.BBoxImage.load_json(data)
+                self.bbox_images.append(bbox_image)
 
             self.spinner_setup()
             self.save_button.configure(state="normal")
@@ -405,7 +360,7 @@ class App(tk.Tk):
             messagebox.showerror(
                 title="Load error", message="Could not load the JSON file\n\n"
             )
-            self.images = []
+            self.bbox_images = []
             self.save_button.configure(state="disabled")
             self.save_as_button.configure(state="disabled")
             self.spinner_clear()
@@ -415,7 +370,7 @@ class App(tk.Tk):
         self.image_no.set(1)
         self.spinner.configure(state="normal")
         self.spinner.configure(from_=1)
-        self.spinner.configure(to=len(self.images))
+        self.spinner.configure(to=len(self.bbox_images))
 
     def spinner_clear(self) -> None:
         self.image_no.set(0)

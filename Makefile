@@ -9,7 +9,7 @@ install:
 
 dev:
 	uv sync
-	uv pip install --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/rocm7.0
+	uv pip install --upgrade torch torchvision --index-url https://download.pytorch.org/whl/rocm7.1
 
 clean:
 	rm -rf .venv

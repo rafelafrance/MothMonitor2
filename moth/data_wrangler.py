@@ -1,78 +1,31 @@
 #!/usr/bin/env python3
 
 import argparse
-import glob
-import json
-import random
 import textwrap
 from pathlib import Path
 
-import imagesize
 from PIL import Image, ImageDraw
 from rich.console import Console
 from rich.table import Table
 from tqdm import tqdm
 
-from moth.pylib import util
+from moth.pylib import bbox
 
 
 def fix_action(args: argparse.Namespace) -> None:
-    with args.bbox_json.open() as f:
-        images = json.load(f)
+    bbox_images = bbox.load_json(args.bbox_json)
 
-    for i, image in enumerate(images):
-        if args.id_prefix:
-            image_id = f"{args.id_prefix}{i:04d}"
-            image["image_id"] = image_id
-            print(image_id)
-
-        if args.new_dir:
-            old = Path(image["path"])
+    if args.new_dir:
+        for image in bbox_images:
+            old = Path(image.path)
             new = args.new_dir / old.name
-            image["path"] = str(new)
+            image.path = str(new)
 
-        if args.rename:
-            src = Path(image["path"])
-            dst = src.with_stem(image["image_id"])
-            image["path"] = str(dst)
-            src.rename(dst)
-
-    with args.bbox_json.open("w") as f:
-        json.dump(images, f, indent=4)
-
-
-def sample_action(args: argparse.Namespace) -> None:
-    args.sample_dir.mkdir(parents=True, exist_ok=True)
-
-    images = []
-    for path in glob.glob(args.dir_glob):
-        path = Path(path)
-        if path.suffix.lower() in (".png", ".jpg", ".jpeg"):
-            images.append(path)
-
-    images = sorted(images)
-    random.seed(args.seed)
-    images = random.choices(images, k=args.samples)
-
-    for i, path in tqdm(enumerate(images)):
-        width, height = imagesize.get(path)
-        width, height = int(width * args.scale), int(height * args.scale)
-
-        with Image.open(path) as image:
-            image = image.resize((width, height))
-
-            left = random.choice(range(width - args.width))
-            top = random.choice(range(height - args.height))
-
-            image = image.crop((left, top, left + args.width, top + args.height))
-
-            name = args.sample_dir / f"{i:04d}{path.suffix}"
-            image.save(name)
+    bbox.dump_json(bbox_images, args.bbox_json)
 
 
 def count_action(args: argparse.Namespace) -> None:
-    with args.bbox_json.open() as f:
-        images = json.load(f)
+    bbox_images = bbox.load_json(args.bbox_json)
 
     counts = {
         "empty": 0,
@@ -80,23 +33,23 @@ def count_action(args: argparse.Namespace) -> None:
         "not_moth": 0,
         "unsure": 0,
     }
-    for image in images:
-        if len(image["boxes"]) == 0:
+    for image in bbox_images:
+        if len(image.bboxes) == 0:
             counts["empty"] += 1
-        for content in util.BBOX:
-            counts[content] += sum(1 for b in image["boxes"] if b["content"] == content)
+        for content in bbox.BBOX_FORMAT:
+            counts[content] += sum(1 for b in image.bboxes if b.content == content)
 
     table = Table(title="Count Box Types")
     table.add_column("", no_wrap=True)
     table.add_column("Count", justify="right")
 
-    table.add_row("Images with boxes", f"{len(images) - counts['empty']:,d}")
+    table.add_row("Images with boxes", f"{len(bbox_images) - counts['empty']:,d}")
     table.add_row("Empty images", f"{counts['empty']:,d}")
-    table.add_row("Total images", f"{len(images):,d}")
+    table.add_row("Total images", f"{len(bbox_images):,d}")
     table.add_row("", "")
 
     total = 0
-    for content in util.BBOX:
+    for content in bbox.BBOX_FORMAT:
         table.add_row(f"{content.title()} boxes", f"{counts[content]:,d}")
         total += counts[content]
 
@@ -106,80 +59,28 @@ def count_action(args: argparse.Namespace) -> None:
     console.print(table)
 
 
-def detr_action(args: argparse.Namespace) -> None:
-    with args.bbox_json.open() as f:
-        all_images = json.load(f)
-
-    random.seed(args.seed)
-    random.shuffle(all_images)
-
-    # Fake image IDs
-    for i, image in enumerate(all_images):
-        image["image_id"] = f"{i:04d}"
-
-    total: int = len(all_images)
-    split1: int = round(total * args.train_fract)
-    split2: int = split1 + round(total * args.valid_fract)
-
-    image_splits: dict[str, list] = {
-        "train": all_images[:split1],
-        "valid": all_images[split1:split2],
-        "test": all_images[split2:],
-    }
-
-    for split, images in image_splits.items():
-        records = []
-        for image in images:
-            rec = {
-                "image_id": image["image_id"],
-                "width": image["width"],
-                "height": image["height"],
-                "path": image["path"],
-                "objects": {"area": [], "bbox": [], "category": [], "id": []},
-            }
-            for box in image["boxes"]:
-                width = abs(box["x1"] - box["x0"])
-                height = abs(box["y1"] - box["y0"])
-                left = min(box["x0"], box["x1"])
-                top = min(box["y0"], box["y1"])
-
-                rec["objects"]["id"].append(box["id_"])
-                rec["objects"]["area"].append(width * height)
-                rec["objects"]["category"].append(util.label2id[box["content"]])
-                rec["objects"]["bbox"].append([left, top, width, height])
-
-            records.append(rec)
-
-        path = args.base_path.with_name(f"{args.base_path.stem}_{split}.json")
-        with path.open("w") as f:
-            json.dump(records, f, indent=4)
-
-
 def pics_action(args: argparse.Namespace) -> None:
     args.pics_dir.mkdir(parents=True, exist_ok=True)
 
-    with args.bbox_json.open() as f:
-        images = json.load(f)
+    bbox_images = bbox.load_json(args.bbox_json)
 
-    images = sorted(images, key=lambda i: i["path"])
-    images = images[: args.limit]
+    bbox_images = sorted(bbox_images, key=lambda i: i["path"])
+    bbox_images = bbox_images[: args.limit]
 
-    for rec in tqdm(images):
-        with Image.open(rec["path"]) as image:
+    for bbox_image in tqdm(bbox_images):
+        with Image.open(bbox_image["path"]) as image:
             draw = ImageDraw.Draw(image)
 
-            for box in rec["boxes"]:
-                x0 = min(box["x0"], box["x1"])
-                x1 = max(box["x0"], box["x1"])
-                y0 = min(box["y0"], box["y1"])
-                y1 = max(box["y0"], box["y1"])
+            for box in bbox_image.boxes:
+                x0 = min(box.x0, box.x1)
+                x1 = max(box.x0, box.x1)
+                y0 = min(box.y0, box.y1)
+                y1 = max(box.y0, box.y1)
                 draw.rectangle(
-                    [(x0, y0), (x1, y1)],
-                    outline=util.COLOR[box["content"]],
-                    width=4,
+                    [(x0, y0), (x1, y1)], outline=bbox.BBOX_COLOR[box["content"]]
                 )
 
-            path = args.pics_dir / Path(rec["path"]).name
+            path = args.pics_dir / Path(bbox_image.path).name
             image.save(path)
 
 
@@ -214,14 +115,6 @@ def parse_args() -> argparse.Namespace:
     )
 
     fix_parser.add_argument(
-        "--id-prefix",
-        type=int,
-        metavar="INT",
-        help="""Use this as a prefix for new image IDs. It's an easy way to avoid
-            file name conflicts. For some odd reason integers seem to be required.""",
-    )
-
-    fix_parser.add_argument(
         "--new-dir",
         type=Path,
         metavar="PATH",
@@ -229,81 +122,7 @@ def parse_args() -> argparse.Namespace:
             now update the bug bounding box JSON file to this new directory.""",
     )
 
-    fix_parser.add_argument(
-        "--rename",
-        action="store_true",
-        help="""Rename image files to use the image ID as the stem.""",
-    )
-
     fix_parser.set_defaults(func=fix_action)
-
-    # ------------------------------------------------------------
-    sample_parser = subparsers.add_parser(
-        "sample",
-        help="""Sample images to create a datasets for training, validation,
-            or testing. It samples image files, scales them, and cut out a random
-            section (of the given size) and puts the images into a directory.""",
-    )
-
-    sample_parser.add_argument(
-        "--dir-glob",
-        type=str,
-        required=True,
-        metavar="GLOB",
-        help="""Sample images from this set of directories. You need to quote this
-            argument. Only image files are used (jpg, jpeg, png, etc.).
-            For example --dir-glob 'data/images/**'.""",
-    )
-
-    sample_parser.add_argument(
-        "--sample-dir",
-        type=Path,
-        required=True,
-        metavar="PATH",
-        help="""Output the sampled images to this directory.""",
-    )
-
-    sample_parser.add_argument(
-        "--scale",
-        type=float,
-        default=1.0,
-        metavar="FLOAT",
-        help="""The raw images can be huge. You may want to scale them down (or up)
-            so that they are easier to work with. (default: %(default)s)""",
-    )
-
-    sample_parser.add_argument(
-        "--width",
-        type=int,
-        default=1333,
-        metavar="INT",
-        help="""Crop this width of an area out of an image. (default: %(default)s)""",
-    )
-
-    sample_parser.add_argument(
-        "--height",
-        type=int,
-        default=800,
-        metavar="INT",
-        help="""Crop this height of an area out of an image. (default: %(default)s)""",
-    )
-
-    sample_parser.add_argument(
-        "--samples",
-        type=int,
-        default=500,
-        metavar="INT",
-        help="""Number of samples to take. (default: %(default)s)""",
-    )
-
-    sample_parser.add_argument(
-        "--seed",
-        type=int,
-        metavar="INT",
-        help="""Use this as the random seed.""",
-    )
-
-    sample_parser.set_defaults(func=sample_action)
 
     # ------------------------------------------------------------
     count_parser = subparsers.add_parser(
@@ -320,58 +139,6 @@ def parse_args() -> argparse.Namespace:
     )
 
     count_parser.set_defaults(func=count_action)
-
-    # ------------------------------------------------------------
-    detr_parser = subparsers.add_parser(
-        "detr",
-        help="""Format and split images into test, valid, and test datasets
-            using the Hugging Face format for the detr model.""",
-    )
-
-    detr_parser.add_argument(
-        "--bbox-json",
-        type=Path,
-        required=True,
-        metavar="PATH",
-        help="""Use this JSON file as the input.""",
-    )
-
-    detr_parser.add_argument(
-        "--base-path",
-        type=Path,
-        required=True,
-        metavar="PATH",
-        help="""Output the training, validation, and testing JSON files using
-            this as this as the base path. The final paths will look like:
-            <base-path>_train.json, <base-path>_valid.json, and
-            <base-path>_test.json""",
-    )
-
-    detr_parser.add_argument(
-        "--train-fract",
-        type=float,
-        default=0.6,
-        metavar="FLOAT",
-        help="""What fraction of the records to use for training.
-            (default: %(default)s)""",
-    )
-
-    detr_parser.add_argument(
-        "--valid-fract",
-        type=float,
-        default=0.2,
-        metavar="FLOAT",
-        help="""What fraction of the records to use for validation.
-            (default: %(default)s)""",
-    )
-
-    detr_parser.add_argument(
-        "--seed",
-        type=int,
-        help="""Seed for the random number generator.""",
-    )
-
-    detr_parser.set_defaults(func=detr_action)
 
     # ------------------------------------------------------------
     pics_parser = subparsers.add_parser(
