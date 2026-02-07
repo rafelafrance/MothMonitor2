@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 
 import argparse
+import json
+import random
 import textwrap
+from datetime import datetime
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -68,10 +71,10 @@ def pics_action(args: argparse.Namespace) -> None:
     bbox_images = bbox_images[: args.limit]
 
     for bbox_image in tqdm(bbox_images):
-        with Image.open(bbox_image["path"]) as image:
+        with Image.open(bbox_image.path) as image:
             draw = ImageDraw.Draw(image)
 
-            for box in bbox_image.boxes:
+            for box in bbox_image.bboxes:
                 x0 = min(box.x0, box.x1)
                 x1 = max(box.x0, box.x1)
                 y0 = min(box.y0, box.y1)
@@ -82,6 +85,91 @@ def pics_action(args: argparse.Namespace) -> None:
 
             path = args.pics_dir / Path(bbox_image.path).name
             image.save(path)
+
+
+def coco_action(args: argparse.Namespace) -> None:
+    bbox_images = bbox.load_json(args.bbox_json)
+
+    random.seed(args.seed)
+    random.shuffle(bbox_images)
+
+    # Fake image IDs
+    for i, bbox_image in enumerate(bbox_images):
+        bbox_image.image_id = i
+
+    total: int = len(bbox_images)
+    split1: int = round(total * args.train_fract)
+    split2: int = split1 + round(total * args.valid_fract)
+
+    image_splits: dict[str, list] = {
+        "train": bbox_images[:split1],
+        "valid": bbox_images[split1:split2],
+        "test": bbox_images[split2:],
+    }
+
+    for split, split_images in image_splits.items():
+        coco_data = {
+            "info": {
+                "description": f"{split} data from {args.bbox_json}",
+                "date_created": f"{datetime.now().isoformat()}",
+            },
+            "categories": [{"id": i, "name": n} for i, n in bbox.id2label.items()],
+            "images": [],
+            "annotations": [],
+        }
+        images = []
+        annotations = []
+        for bbox_image in split_images:
+            images.append(
+                {
+                    "id": bbox_image.image_id,
+                    "file_name": Path(bbox_image.path).name,
+                    "height": bbox_image.height,
+                    "width": bbox_image.width,
+                }
+            )
+            for box in bbox_image.bboxes:
+                annotation = {
+                    "id": box.id_,
+                    "image_id": bbox_image.image_id,
+                    "category_id": bbox.label2id[box.content],
+                    "area": box.area,
+                    "bbox": box.xywh(),
+                    "iscrowd": 0,
+                }
+                annotations.append(annotation)
+
+        coco_data["images"] = images
+        coco_data["annotations"] = annotations
+
+        path = args.base_path.with_name(f"{args.base_path.stem}_{split}.json")
+        with path.open("w") as f:
+            json.dump(coco_data, f, indent=4)
+
+
+def split_action(args: argparse.Namespace) -> None:
+    bbox_images = bbox.load_json(args.bbox_json)
+
+    random.seed(args.seed)
+    random.shuffle(bbox_images)
+
+    # Fake image IDs
+    for i, bbox_image in enumerate(bbox_images):
+        bbox_image.image_id = i
+
+    total: int = len(bbox_images)
+    split1: int = round(total * args.train_fract)
+    split2: int = split1 + round(total * args.valid_fract)
+
+    image_splits: dict[str, list] = {
+        "train": bbox_images[:split1],
+        "valid": bbox_images[split1:split2],
+        "test": bbox_images[split2:],
+    }
+
+    for split, images in image_splits.items():
+        path = args.base_path.with_name(f"{args.base_path.stem}_{split}.json")
+        bbox.dump_json(images, path)
 
 
 def parse_args() -> argparse.Namespace:
@@ -171,6 +259,110 @@ def parse_args() -> argparse.Namespace:
     )
 
     pics_parser.set_defaults(func=pics_action)
+
+    # ------------------------------------------------------------
+    coco_parser = subparsers.add_parser(
+        "coco",
+        help="""Format and split images into training, validation, and testing datasets
+            using coco annotations format.""",
+    )
+
+    coco_parser.add_argument(
+        "--bbox-json",
+        type=Path,
+        required=True,
+        metavar="PATH",
+        help="""Use this JSON file as the input.""",
+    )
+
+    coco_parser.add_argument(
+        "--base-path",
+        type=Path,
+        required=True,
+        metavar="PATH",
+        help="""Output the training, validation, and testing JSON files using
+            this as this as the base path. The final paths will look like:
+            <base-path>_train.json, <base-path>_valid.json, and
+            <base-path>_test.json""",
+    )
+
+    coco_parser.add_argument(
+        "--train-fract",
+        type=float,
+        default=0.6,
+        metavar="FLOAT",
+        help="""What fraction of the records to use for training.
+            (default: %(default)s)""",
+    )
+
+    coco_parser.add_argument(
+        "--valid-fract",
+        type=float,
+        default=0.2,
+        metavar="FLOAT",
+        help="""What fraction of the records to use for validation.
+            (default: %(default)s)""",
+    )
+
+    coco_parser.add_argument(
+        "--seed",
+        type=int,
+        help="""Seed for the random number generator.""",
+    )
+
+    coco_parser.set_defaults(func=coco_action)
+
+    # ------------------------------------------------------------
+    split_parser = subparsers.add_parser(
+        "split",
+        help="""Split annotaions (bboxes) into training, validation, and testing
+            datasets using coco annotations format.""",
+    )
+
+    split_parser.add_argument(
+        "--bbox-json",
+        type=Path,
+        required=True,
+        metavar="PATH",
+        help="""Use this JSON file as the input.""",
+    )
+
+    split_parser.add_argument(
+        "--base-path",
+        type=Path,
+        required=True,
+        metavar="PATH",
+        help="""Output the training, validation, and testing JSON files using
+            this as this as the base path. The final paths will look like:
+            <base-path>_train.json, <base-path>_valid.json, and
+            <base-path>_test.json""",
+    )
+
+    split_parser.add_argument(
+        "--train-fract",
+        type=float,
+        default=0.6,
+        metavar="FLOAT",
+        help="""What fraction of the records to use for training.
+            (default: %(default)s)""",
+    )
+
+    split_parser.add_argument(
+        "--valid-fract",
+        type=float,
+        default=0.2,
+        metavar="FLOAT",
+        help="""What fraction of the records to use for validation.
+            (default: %(default)s)""",
+    )
+
+    split_parser.add_argument(
+        "--seed",
+        type=int,
+        help="""Seed for the random number generator.""",
+    )
+
+    split_parser.set_defaults(func=split_action)
 
     # ------------------------------------------------------------
     args = arg_parser.parse_args()

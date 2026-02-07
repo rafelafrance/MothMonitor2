@@ -1,16 +1,13 @@
-import glob
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
-
-import imagesize
 
 TOO_SMALL = 20
 
-FONT = ("liberation sans", 16)
-FONT_SM = ("liberation sans", 12)
+FONT: tuple[str, int] = ("liberation sans", 16)
+FONT_SM: tuple[str, int] = ("liberation sans", 12)
 
-BBOX_FORMAT = {
+BBOX_FORMAT: dict[str, dict] = {
     "moth": {"background": "red", "foreground": "white", "font": FONT},
     "not_moth": {"background": "blue", "foreground": "white", "font": FONT},
     "unsure": {"background": "green", "foreground": "white", "font": FONT},
@@ -27,11 +24,11 @@ BBOX_FORMAT = {
     # {"background": "gray", "font": FONT},
     # {"background": "lavender", "font": FONT},
 }
-BBOX_COLOR = {k: v["background"] for k, v in BBOX_FORMAT.items()}
-BBOX_NUM_CLASSES = len(BBOX_FORMAT) + 1  # 0 is for the background
+BBOX_COLOR: dict[str, str] = {k: v["background"] for k, v in BBOX_FORMAT.items()}
+BBOX_NUM_CLASSES: int = len(BBOX_FORMAT)
 
-id2label = dict(enumerate(BBOX_FORMAT, 1))  # Note that 0 is for the background
-label2id = {k: i for i, k in id2label.items()}
+id2label: dict[int, str] = dict(enumerate(BBOX_FORMAT))
+label2id: dict[str, int] = {k: i for i, k in id2label.items()}
 
 
 class BBox:
@@ -81,12 +78,19 @@ class BBox:
     def xyxy(self) -> list[int]:
         return [self.x0, self.y0, self.x1, self.y1]
 
+    def xywh(self) -> list[int]:
+        return [self.x0, self.y0, (self.x1 - self.x0), (self.y1 - self.y0)]
+
+    def to_dict(self) -> dict:
+        return self.__dict__
+
 
 @dataclass
 class BBoxImage:
     path: str
     width: int = 0  # It's just easier to have this here
     height: int = 0  # It's just easier to have this here
+    image_id: int = 0
     bboxes: list[BBox] = field(default_factory=list)
 
     def filter_size(self) -> None:
@@ -94,7 +98,7 @@ class BBoxImage:
 
     def delete_box(self, x: int, y: int) -> None:
         if hits := [b for b in self.bboxes if b.point_hit(x, y)]:
-            hits = sorted(hits, key=lambda b: b.area())
+            hits = sorted(hits, key=lambda b: b.area)
             self.bboxes = [b for b in self.bboxes if b != hits[0]]
 
     @classmethod
@@ -103,11 +107,15 @@ class BBoxImage:
             path=bbox_data["path"],
             width=bbox_data["width"],
             height=bbox_data["height"],
-            bboxes=[BBox.load_json(b) for b in bbox_data["boxes"]],
+            image_id=bbox_data.get("image_id", 0),
+            bboxes=[BBox.load_json(b) for b in bbox_data["bboxes"]],
         )
 
     def bboxes_as_xyxy(self) -> list[list[int]]:
         return [b.xyxy() for b in self.bboxes]
+
+    def bboxes_as_xywh(self) -> list[list[int]]:
+        return [b.xywh() for b in self.bboxes]
 
     def bbox_labels(self) -> list[int]:
         return [b.label for b in self.bboxes]
@@ -115,14 +123,19 @@ class BBoxImage:
     def bbox_areas(self) -> list[float]:
         return [b.area for b in self.bboxes]
 
+    def to_dict(self) -> dict:
+        dct = {k: v for k, v in self.__dict__.items() if k != "bboxes"}
+        dct["bboxes"] = [b.to_dict() for b in self.bboxes]
+        return dct
+
 
 def load_json(bbox_json: Path) -> list[BBoxImage]:
     with bbox_json.open() as f:
         bbox_data = json.load(f)
-    return [BBoxImage.load_json(i) for i in bbox_data]
+    return [BBoxImage.load_json(d) for d in bbox_data]
 
 
 def dump_json(bbox_images: list[BBoxImage], bbox_json: Path, indent: int = 4) -> None:
-    json_data = [asdict(i) for i in bbox_images]
+    json_data = [i.to_dict() for i in bbox_images]
     with bbox_json.open("w") as f:
         json.dump(json_data, f, indent=indent)
