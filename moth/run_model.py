@@ -6,6 +6,9 @@ from pathlib import Path
 from pprint import pp
 
 import torch
+from PIL import Image
+from pycocotools.coco import COCO
+from pycocotools.cocoeval import COCOeval
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from torchvision.models.detection import (
@@ -47,18 +50,22 @@ def train_action(args: argparse.Namespace) -> None:
     valid_xforms = v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32, scale=True)])
 
     train_dataset = moth_dataset.MothDataset(
-        args.train_json, train_xforms, limit=args.limit
+        bbox_json=args.train_json, transforms=train_xforms, limit=args.limit
     )
-    valid_dataset = moth_dataset.MothDataset(
-        args.valid_json, valid_xforms, limit=args.limit
-    )
+    # valid_dataset = moth_dataset.MothDataset(
+    #     bbox_json=args.valid_json, transforms=valid_xforms, limit=args.limit
+    # )
+    # coco = valid_dataset.to_coco_obj()
 
     train_loader = DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn
     )
-    valid_loader = DataLoader(
-        valid_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn
-    )
+
+    # valid_loader = DataLoader(
+    #     valid_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn
+    # )
+
+    coco = COCO(args.valid_json)
 
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.SGD(params, lr=0.001, momentum=0.9)
@@ -66,43 +73,86 @@ def train_action(args: argparse.Namespace) -> None:
 
     for epoch in range(1, args.epochs + 1):
         model.train()
-        train_loss = one_epoch(model, device, train_loader, optimizer)
+        train_loss = train_one_epoch(model, device, train_loader, optimizer)
 
-        # model.eval()
-        valid_loss = one_epoch(model, device, valid_loader)
+        model.eval()
+        valid_loss = score_one_epoch(model, device, valid_xforms, coco, args.image_dir)
 
         print(f"{epoch + 1} training loss {train_loss} validation loss {valid_loss}")
 
 
-def one_epoch(
+def train_one_epoch(
     model: FasterRCNN,
     device: torch.device,
     loader: DataLoader,
-    optimizer: Optimizer | None = None,
+    optimizer: Optimizer,
 ) -> float:
     running_loss = 0.0
 
     for images, targets in loader:
         images = [image.to(device) for image in images]
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-        pp(targets)
 
         loss_dict = model(images, targets)
-        print("loss_dict")
-        pp(loss_dict)
 
         losses = sum(loss for loss in loss_dict.values())
-        print(f"{losses=}")
-        print()
 
-        if optimizer:
-            optimizer.zero_grad()
-            losses.backward()
-            optimizer.step()
+        optimizer.zero_grad()
+        losses.backward()
+        optimizer.step()
 
         running_loss += losses.item()
 
     return running_loss / len(loader)
+
+
+def score_one_epoch(
+    model: FasterRCNN,
+    device: torch.device,
+    transforms: v2.Compose,
+    coco: COCO,
+    image_dir: Path,
+) -> float:
+    predictions = []
+
+    for image_id in coco.getImgIds():
+        image_rec = coco.loadImgs(image_id)[0]
+        image_path = str(image_dir / image_rec["file_name"])
+        image = Image.open(image_path)
+        image = transforms(image)
+        image /= 255.0
+        image = image.unsqueeze(0)
+        image = image.to(device)
+
+        with torch.no_grad():
+            outputs = model(image)
+
+        for output in outputs:
+            boxes = output["boxes"].cpu().numpy()
+            scores = output["scores"].cpu().numpy()
+            labels = output["labels"].cpu().numpy()
+
+            for box, score, label in zip(boxes, scores, labels, strict=True):
+                prediction = {
+                    "image_id": int(image_id),
+                    "category_id": label,
+                    "bbox": [box[0], box[1], box[2] - box[0], box[3] - box[1]],
+                    "score": score,
+                }
+                predictions.append(str(prediction))
+
+    pp(predictions[:10])
+    print([type(p["image_id"]) for p in predictions])
+    coco_results = coco.loadRes(predictions)
+    pp(coco_results.dataset["annotations"])
+    coco_eval = COCOeval(coco, coco_results, "bbox")
+    coco_eval.evaluate()
+    coco_eval.accumulate()
+    coco_eval.summarize()
+    print()
+
+    # return running_loss / len(loader)
+    return 0.0
 
 
 def score_action(args: argparse.Namespace) -> None:

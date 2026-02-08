@@ -11,7 +11,8 @@ requires-python = ">=3.13"
 dependencies = [
   "imagesize",
   "pillow>=11.3.0",
-  "pycocotools",
+  "pycocotools>=2.0.11",
+  "rich>=14.3.2",
   "scikit-image",
   "torch==2.11.0a0+rocm7.11.0a20260106",
   "torchmetrics",

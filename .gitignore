@@ -49,9 +49,6 @@ scratch/
 old/
 experiments/
 
-# External
-external/
-
 # secrets
 *secret*
 time/

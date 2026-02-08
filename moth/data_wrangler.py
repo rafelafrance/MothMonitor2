@@ -4,7 +4,6 @@ import argparse
 import json
 import random
 import textwrap
-from datetime import datetime
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -12,7 +11,7 @@ from rich.console import Console
 from rich.table import Table
 from tqdm import tqdm
 
-from moth.pylib import bbox
+from moth.pylib import bbox, moth_dataset
 
 
 def fix_action(args: argparse.Namespace) -> None:
@@ -101,47 +100,14 @@ def coco_action(args: argparse.Namespace) -> None:
     split1: int = round(total * args.train_fract)
     split2: int = split1 + round(total * args.valid_fract)
 
-    image_splits: dict[str, list] = {
-        "train": bbox_images[:split1],
-        "valid": bbox_images[split1:split2],
-        "test": bbox_images[split2:],
+    image_splits: dict[str, moth_dataset.MothDataset] = {
+        "train": moth_dataset.MothDataset(bbox_images=bbox_images[:split1]),
+        "valid": moth_dataset.MothDataset(bbox_images=bbox_images[split1:split2]),
+        "test": moth_dataset.MothDataset(bbox_images=bbox_images[split2:]),
     }
 
-    for split, split_images in image_splits.items():
-        coco_data = {
-            "info": {
-                "description": f"{split} data from {args.bbox_json}",
-                "date_created": f"{datetime.now().isoformat()}",
-            },
-            "categories": [{"id": i, "name": n} for i, n in bbox.id2label.items()],
-            "images": [],
-            "annotations": [],
-        }
-        images = []
-        annotations = []
-        for bbox_image in split_images:
-            images.append(
-                {
-                    "id": bbox_image.image_id,
-                    "file_name": Path(bbox_image.path).name,
-                    "height": bbox_image.height,
-                    "width": bbox_image.width,
-                }
-            )
-            for box in bbox_image.bboxes:
-                annotation = {
-                    "id": box.id_,
-                    "image_id": bbox_image.image_id,
-                    "category_id": bbox.label2id[box.content],
-                    "area": box.area,
-                    "bbox": box.xywh(),
-                    "iscrowd": 0,
-                }
-                annotations.append(annotation)
-
-        coco_data["images"] = images
-        coco_data["annotations"] = annotations
-
+    for split, dataset in image_splits.items():
+        coco_data = dataset.to_coco_dict()
         path = args.base_path.with_name(f"{args.base_path.stem}_{split}.json")
         with path.open("w") as f:
             json.dump(coco_data, f, indent=4)
