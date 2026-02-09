@@ -3,12 +3,8 @@
 import argparse
 import textwrap
 from pathlib import Path
-from pprint import pp
 
 import torch
-from PIL import Image
-from pycocotools.coco import COCO
-from pycocotools.cocoeval import COCOeval
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from torchvision.models.detection import (
@@ -19,6 +15,8 @@ from torchvision.models.detection import (
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.transforms import v2
 
+from moth.external.coco_eval import COCOeval
+from moth.external.engine import evaluate, train_one_epoch
 from moth.pylib import bbox, moth_dataset
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
@@ -52,107 +50,146 @@ def train_action(args: argparse.Namespace) -> None:
     train_dataset = moth_dataset.MothDataset(
         bbox_json=args.train_json, transforms=train_xforms, limit=args.limit
     )
-    # valid_dataset = moth_dataset.MothDataset(
-    #     bbox_json=args.valid_json, transforms=valid_xforms, limit=args.limit
-    # )
-    # coco = valid_dataset.to_coco_obj()
+    valid_dataset = moth_dataset.MothDataset(
+        bbox_json=args.valid_json, transforms=valid_xforms, limit=args.limit
+    )
 
     train_loader = DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn
     )
-
-    # valid_loader = DataLoader(
-    #     valid_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn
-    # )
-
-    coco = COCO(args.valid_json)
+    valid_loader = DataLoader(
+        valid_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn
+    )
 
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.SGD(params, lr=0.001, momentum=0.9)
     # optimizer=torch.optim.AdamW(parameters,lr=args.lr,weight_decay=args.weight_decay)
 
+    best_precision = 0.0
+
     for epoch in range(1, args.epochs + 1):
-        model.train()
-        train_loss = train_one_epoch(model, device, train_loader, optimizer)
+        train_one_epoch(model, optimizer, train_loader, device, epoch, print_freq=100)
 
-        model.eval()
-        valid_loss = score_one_epoch(model, device, valid_xforms, coco, args.image_dir)
+        # lr_scheduler.step()
 
-        print(f"{epoch + 1} training loss {train_loss} validation loss {valid_loss}")
+        coco_eval = evaluate(model, valid_loader, device=device)
+        precision, recall = get_stats(coco_eval)
+
+        best_precision = save_state(
+            epoch,
+            model,
+            optimizer,
+            args.checkpoint_dir,
+            precision,
+            recall,
+            best_precision,
+        )
 
 
-def train_one_epoch(
+def get_stats(coco_eval: COCOeval) -> tuple[float, float]:
+    stats_split = 6
+    precision = sum(coco_eval.coco_eval["bbox"].stats[:stats_split]) / stats_split
+    recall = sum(coco_eval.coco_eval["bbox"].stats[stats_split:]) / stats_split
+    return precision, recall
+
+
+def save_state(
+    epoch: int,
     model: FasterRCNN,
-    device: torch.device,
-    loader: DataLoader,
     optimizer: Optimizer,
+    checkpoint_dir: Path,
+    precision: float,
+    recall: float,
+    best_precision: float,
 ) -> float:
-    running_loss = 0.0
+    best_precision = max(precision, best_precision)
 
-    for images, targets in loader:
-        images = [image.to(device) for image in images]
-        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+    if checkpoint_dir and precision > best_precision:
+        state_path = checkpoint_dir / f"checkpoint_{epoch}.pth"
+        state = {
+            "epoch": epoch + 1,
+            "state_dict": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "precision": precision,
+            "recall": recall,
+        }
+        torch.save(state, state_path)
 
-        loss_dict = model(images, targets)
-
-        losses = sum(loss for loss in loss_dict.values())
-
-        optimizer.zero_grad()
-        losses.backward()
-        optimizer.step()
-
-        running_loss += losses.item()
-
-    return running_loss / len(loader)
+    return best_precision
 
 
-def score_one_epoch(
-    model: FasterRCNN,
-    device: torch.device,
-    transforms: v2.Compose,
-    coco: COCO,
-    image_dir: Path,
-) -> float:
-    predictions = []
-
-    for image_id in coco.getImgIds():
-        image_rec = coco.loadImgs(image_id)[0]
-        image_path = str(image_dir / image_rec["file_name"])
-        image = Image.open(image_path)
-        image = transforms(image)
-        image /= 255.0
-        image = image.unsqueeze(0)
-        image = image.to(device)
-
-        with torch.no_grad():
-            outputs = model(image)
-
-        for output in outputs:
-            boxes = output["boxes"].cpu().numpy()
-            scores = output["scores"].cpu().numpy()
-            labels = output["labels"].cpu().numpy()
-
-            for box, score, label in zip(boxes, scores, labels, strict=True):
-                prediction = {
-                    "image_id": int(image_id),
-                    "category_id": label,
-                    "bbox": [box[0], box[1], box[2] - box[0], box[3] - box[1]],
-                    "score": score,
-                }
-                predictions.append(str(prediction))
-
-    pp(predictions[:10])
-    print([type(p["image_id"]) for p in predictions])
-    coco_results = coco.loadRes(predictions)
-    pp(coco_results.dataset["annotations"])
-    coco_eval = COCOeval(coco, coco_results, "bbox")
-    coco_eval.evaluate()
-    coco_eval.accumulate()
-    coco_eval.summarize()
-    print()
-
-    # return running_loss / len(loader)
-    return 0.0
+# def train_one_epoch(
+#     model: FasterRCNN,
+#     device: torch.device,
+#     loader: DataLoader,
+#     optimizer: Optimizer,
+# ) -> float:
+#     running_loss = 0.0
+#
+#     for images, targets in loader:
+#         images = [image.to(device) for image in images]
+#         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+#
+#         loss_dict = model(images, targets)
+#
+#         losses = sum(loss for loss in loss_dict.values())
+#
+#         optimizer.zero_grad()
+#         losses.backward()
+#         optimizer.step()
+#
+#         running_loss += losses.item()
+#
+#     return running_loss / len(loader)
+#
+#
+# def score_one_epoch(
+#     model: FasterRCNN,
+#     device: torch.device,
+#     transforms: v2.Compose,
+#     coco: COCO,
+#     image_dir: Path,
+# ) -> float:
+#     predictions = []
+#
+#     for image_id in coco.getImgIds():
+#         image_rec = coco.loadImgs(image_id)[0]
+#         image_path = str(image_dir / image_rec["file_name"])
+#         image = Image.open(image_path)
+#         image = transforms(image)
+#         image /= 255.0
+#         image = image.unsqueeze(0)
+#         image = image.to(device)
+#
+#         with torch.no_grad():
+#             outputs = model(image)
+#
+#         for output in outputs:
+#             boxes = output["boxes"].cpu().numpy()
+#             scores = output["scores"].cpu().numpy()
+#             labels = output["labels"].cpu().numpy()
+#
+#             for box, score, label in zip(boxes, scores, labels, strict=True):
+#                 prediction = {
+#                     "image_id": int(image_id),
+#                     "category_id": label,
+#                     "bbox": [box[0], box[1], box[2] - box[0], box[3] - box[1]],
+#                     "score": score,
+#                 }
+#                 predictions.append(str(prediction))
+#
+#     pp(predictions[:10])
+#     print([type(p["image_id"]) for p in predictions])
+#     coco_results = coco.loadRes(predictions)
+#     pp(coco_results.dataset["annotations"])
+#     coco_eval = COCOeval(coco, coco_results, "bbox")
+#     coco_eval.evaluate()
+#     coco_eval.accumulate()
+#     coco_eval.summarize()
+#     print()
+#
+#     # return running_loss / len(loader)
+#     return 0.0
 
 
 def score_action(args: argparse.Namespace) -> None:
@@ -197,12 +234,12 @@ def parse_args() -> argparse.Namespace:
     #     help="""Finetune this model. (default: %(default)s)""",
     # )
 
-    # train_parser.add_argument(
-    #     "--output-dir",
-    #     type=Path,
-    #     metavar="PATH",
-    #     help="""Save model checkpoints in this directory.""",
-    # )
+    train_parser.add_argument(
+        "--checkpoint-dir",
+        type=Path,
+        metavar="PATH",
+        help="""Save model checkpoints in this directory.""",
+    )
 
     train_parser.add_argument(
         "--epochs",

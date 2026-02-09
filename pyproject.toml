@@ -41,7 +41,7 @@ module-root = "."
 module-name = "moth"
 
 [tool.ruff]
-exclude = ["notebooks/*"]
+exclude = ["notebooks/*", "external/*"]
 
 show-fixes = true
 

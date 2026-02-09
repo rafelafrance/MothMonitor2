@@ -34,6 +34,7 @@ class MothDataset(torch.utils.data.Dataset):
         bbox_image = self.bbox_images[idx]
 
         image = Image.open(bbox_image.path)
+
         if bbox_image.bboxes:
             bboxes = torch.as_tensor(bbox_image.bboxes_as_xyxy())
         else:
@@ -43,6 +44,8 @@ class MothDataset(torch.utils.data.Dataset):
             "image_id": torch.as_tensor(bbox_image.image_id, dtype=torch.int64),
             "boxes": bboxes,
             "labels": torch.as_tensor(bbox_image.bbox_labels(), dtype=torch.int64),
+            "area": torch.as_tensor(bbox_image.bbox_areas(), dtype=torch.float32),
+            "iscrowd": torch.zeros((len(bbox_image.bboxes),), dtype=torch.int64),
         }
 
         if self.transforms is not None:
