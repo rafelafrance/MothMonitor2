@@ -10,7 +10,7 @@ from pycocotools.cocoeval import COCOeval
 from moth.external import utils
 
 
-class CocoEvaluator(object):
+class CocoEvaluator:
     def __init__(self, coco_gt, iou_types):
         assert isinstance(iou_types, (list, tuple))
         coco_gt = copy.deepcopy(coco_gt)
@@ -52,18 +52,17 @@ class CocoEvaluator(object):
 
     def summarize(self):
         for iou_type, coco_eval in self.coco_eval.items():
-            print("IoU metric: {}".format(iou_type))
+            print(f"IoU metric: {iou_type}")
             coco_eval.summarize()
 
     def prepare(self, predictions, iou_type):
         if iou_type == "bbox":
             return self.prepare_for_coco_detection(predictions)
-        elif iou_type == "segm":
+        if iou_type == "segm":
             return self.prepare_for_coco_segmentation(predictions)
-        elif iou_type == "keypoints":
+        if iou_type == "keypoints":
             return self.prepare_for_coco_keypoint(predictions)
-        else:
-            raise ValueError("Unknown iou type {}".format(iou_type))
+        raise ValueError(f"Unknown iou type {iou_type}")
 
     def prepare_for_coco_detection(self, predictions):
         coco_results = []
@@ -311,7 +310,7 @@ def evaluate(self):
     if p.useSegm is not None:
         p.iouType = "segm" if p.useSegm == 1 else "bbox"
         print(
-            "useSegm (deprecated) is not None. Running {} evaluation".format(p.iouType)
+            f"useSegm (deprecated) is not None. Running {p.iouType} evaluation"
         )
     # print('Evaluate annotation type *{}*'.format(p.iouType))
     p.imgIds = list(np.unique(p.imgIds))

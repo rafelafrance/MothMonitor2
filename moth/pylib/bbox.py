@@ -37,7 +37,7 @@ class BBox:
     y0: int
     x1: int
     y1: int
-    id_: int  # Used by tkinter
+    id_: int
 
     def __init__(
         self, content: str, x0: int, y0: int, x1: int, y1: int, id_: int = 0
@@ -122,6 +122,9 @@ class BBoxImage:
 
     def bbox_areas(self) -> list[float]:
         return [b.area for b in self.bboxes]
+
+    def bbox_ids(self) -> list[int]:
+        return [b.id_ for b in self.bboxes]
 
     def to_dict(self) -> dict:
         dct = {k: v for k, v in self.__dict__.items() if k != "bboxes"}

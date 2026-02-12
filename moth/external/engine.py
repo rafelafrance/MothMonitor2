@@ -5,9 +5,9 @@ import time
 import torch
 import torchvision.models.detection.mask_rcnn
 
-from moth.external.coco_utils import get_coco_api_from_dataset
+from moth.external import utils
 from moth.external.coco_eval import CocoEvaluator
-import moth.external.utils as utils
+from moth.external.coco_utils import get_coco_api_from_dataset
 
 
 def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq):

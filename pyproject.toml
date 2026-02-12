@@ -9,11 +9,15 @@ description = "Models helping the MothMonitor project V2"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+  "accelerate>=1.12.0",
+  "albumentations>=2.0.8",
+  "datasets>=4.5.0",
   "imagesize",
   "pillow>=11.3.0",
   "pycocotools>=2.0.11",
   "rich>=14.3.2",
   "scikit-image",
+  "timm>=1.0.24",
   "torch==2.11.0a0+rocm7.11.0a20260106",
   "torchmetrics",
   "torchvision==0.25.0a0+rocm7.11.0a20260106",

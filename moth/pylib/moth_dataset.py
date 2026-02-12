@@ -3,6 +3,7 @@ from pathlib import Path
 import torch
 from PIL import Image
 from pycocotools.coco import COCO
+from torchvision import tv_tensors
 from torchvision.transforms import v2
 
 from moth.pylib import bbox
@@ -36,9 +37,18 @@ class MothDataset(torch.utils.data.Dataset):
         image = Image.open(bbox_image.path)
 
         if bbox_image.bboxes:
-            bboxes = torch.as_tensor(bbox_image.bboxes_as_xyxy())
+            bboxes = tv_tensors.BoundingBoxes(
+                bbox_image.bboxes_as_xywh(), format="XYXY", canvas_size=image.size
+            )
         else:
-            bboxes = torch.empty((0, 4), dtype=torch.float32)
+            bboxes = tv_tensors.BoundingBoxes(
+                torch.empty((0, 4), dtype=torch.float32),
+                format="XYXY",
+                canvas_size=image.size,
+            )
+
+        if self.transforms is not None:
+            image, target = self.transforms(image, bboxes)
 
         target = {
             "image_id": torch.as_tensor(bbox_image.image_id, dtype=torch.int64),
@@ -48,17 +58,27 @@ class MothDataset(torch.utils.data.Dataset):
             "iscrowd": torch.zeros((len(bbox_image.bboxes),), dtype=torch.int64),
         }
 
-        if self.transforms is not None:
-            image, target = self.transforms(image, target)
-
         return image, target
 
+    def to_detr_dict(self) -> dict:
+        records = [
+            {
+                "image_id": i.image_id,
+                "path": i.path,
+                "width": i.width,
+                "height": i.height,
+                "objects": {
+                    "id": i.bbox_ids(),
+                    "area": i.bbox_areas(),
+                    "bbox": i.bboxes_as_xywh(),
+                    "category": i.bbox_labels(),
+                },
+            }
+            for i in self.bbox_images
+        ]
+        return records
+
     def to_coco_dict(self) -> dict:
-        coco_data = {
-            "categories": [{"id": i, "name": n} for i, n in bbox.id2label.items()],
-            "images": [],
-            "annotations": [],
-        }
         images = []
         annotations = []
         for bbox_image in self.bbox_images:
@@ -75,13 +95,16 @@ class MothDataset(torch.utils.data.Dataset):
                     "id": box.id_,
                     "image_id": bbox_image.image_id,
                     "category_id": bbox.label2id[box.content],
-                    "area": box.area,
                     "bbox": box.xywh(),
+                    "area": box.area,
                     "iscrowd": 0,
                 }
                 annotations.append(annotation)
-        coco_data["images"] = images
-        coco_data["annotations"] = annotations
+        coco_data = {
+            "categories": [{"id": i, "name": n} for i, n in bbox.id2label.items()],
+            "images": images,
+            "annotations": annotations,
+        }
         return coco_data
 
     def to_coco_obj(self) -> COCO:
