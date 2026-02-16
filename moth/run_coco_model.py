@@ -3,8 +3,12 @@
 import argparse
 import textwrap
 from pathlib import Path
+from pprint import pp
 
+import numpy as np
 import torch
+from PIL import Image
+from pycocotools.cocoeval import COCOeval
 from torch.utils.data import DataLoader
 from torchvision.models.detection import (
     FasterRCNN_ResNet50_FPN_V2_Weights,
@@ -12,17 +16,16 @@ from torchvision.models.detection import (
 )
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.transforms import v2
+from tqdm import tqdm
 
-from moth.external.engine import evaluate, train_one_epoch
-from moth.pylib import bbox, moth_dataset
+from moth.pylib import bbox
+from moth.pylib.moth_dataset import MothDataset
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD_DEV = [0.229, 0.224, 0.225]
 
 
 def train_action(args: argparse.Namespace) -> None:
-    stats_split = 6
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = fasterrcnn_resnet50_fpn_v2(
@@ -45,20 +48,11 @@ def train_action(args: argparse.Namespace) -> None:
             v2.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD_DEV),
         ]
     )
-    valid_xforms = v2.Compose(
-        [
-            v2.ToImage(),
-            v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(IMAGENET_MEAN, IMAGENET_STD_DEV),
-        ]
-    )
 
-    train_dataset = moth_dataset.MothDataset(
+    train_dataset = MothDataset(
         bbox_json=args.train_json, transforms=train_xforms, limit=args.limit
     )
-    valid_dataset = moth_dataset.MothDataset(
-        bbox_json=args.valid_json, transforms=valid_xforms, limit=args.limit
-    )
+    valid_dataset = MothDataset(bbox_json=args.valid_json, limit=args.limit)
 
     train_loader = DataLoader(
         train_dataset,
@@ -66,46 +60,55 @@ def train_action(args: argparse.Namespace) -> None:
         shuffle=True,
         collate_fn=collate_fn,
     )
-    valid_loader = DataLoader(
-        valid_dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
-        collate_fn=collate_fn,
-    )
 
-    params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.AdamW(
-        params,
-        lr=args.learning_rate,
-        weight_decay=args.weight_decay,
-        amsgrad=args.amsgrad,
-    )
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
-    best_precision = 0.0
+    coco = valid_dataset.to_coco_obj()
 
     for epoch in range(1, args.epochs + 1):
-        train_one_epoch(model, optimizer, train_loader, device, epoch, print_freq=100)
+        # Training loop
+        running_loss = 0.0
+        model.train()
+        for images, targets in tqdm(train_loader):
+            images = [image.to(device) for image in images]
+            targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+            optimizer.zero_grad()
+            loss_dict = model(images, targets)
+            losses = sum(loss for loss in loss_dict.values())
+            losses.backward()
+            optimizer.step()
+            running_loss += losses.item()
+        print(f"Epoch {epoch} Loss: {running_loss / len(train_loader)}")
 
-        coco_eval = evaluate(model, valid_loader, device=device)
+        # Validation loop
+        predictions = []
+        model.eval()
+        for image_id in tqdm(coco.getImgIds()):
+            image_rec = coco.loadImgs(image_id)[0]
+            image = Image.open(args.image_dir / image_rec["file_name"])
+            image = v2.PILToTensor()(image).float() / 255.0
+            image = image.unsqueeze(0)
+            image = image.to(device)
+            with torch.no_grad():
+                preds = model(image)
+            for pred in preds:
+                boxes = pred["boxes"].cpu().numpy()
+                scores = pred["scores"].cpu().numpy()
+                labels = pred["labels"].cpu().numpy()
+                for box, score, label in zip(boxes, scores, labels):
+                    prediction = {
+                        "image_id": image_id,
+                        "category_id": label,
+                        "bbox": [box[0], box[1], box[2] - box[0], box[3] - box[1]],
+                        "score": score,
+                    }
+                    predictions.append(prediction)
 
-        precision = sum(coco_eval.coco_eval["bbox"].stats[:stats_split]) / stats_split
-        recall = sum(coco_eval.coco_eval["bbox"].stats[stats_split:]) / stats_split
-
-        if args.best_checkpoint and precision > best_precision:
-            state = {
-                "epoch": epoch,
-                "state_dict": model.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "precision": precision,
-                "recall": recall,
-            }
-            torch.save(state, args.best_checkpoint)
-
-        best_precision = max(precision, best_precision)
-
-        print(
-            f"Precision {precision} Recall {recall} Best precision {best_precision}\n"
-        )
+        results = coco.loadRes(predictions)
+        coco_eval = COCOeval(coco, results, "bbox")
+        coco_eval.evaluate()
+        coco_eval.accumulate()
+        coco_eval.summarize()
 
 
 def score_action(args: argparse.Namespace) -> None:
@@ -142,13 +145,6 @@ def parse_args() -> argparse.Namespace:
             validation images are already correctly sized and formatted.
             It will perform image augmentations for training.""",
     )
-
-    # train_parser.add_argument(
-    #     "--model-name",
-    #     default="IDEA-Research/dab-detr-resnet-50",
-    #     metavar="PATH",
-    #     help="""Finetune this model. (default: %(default)s)""",
-    # )
 
     train_parser.add_argument(
         "--best-checkpoint",

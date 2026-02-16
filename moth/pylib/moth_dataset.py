@@ -38,7 +38,7 @@ class MothDataset(torch.utils.data.Dataset):
 
         if bbox_image.bboxes:
             bboxes = tv_tensors.BoundingBoxes(
-                bbox_image.bboxes_as_xywh(), format="XYXY", canvas_size=image.size
+                bbox_image.bboxes_as_xyxy(), format="XYXY", canvas_size=image.size
             )
         else:
             bboxes = tv_tensors.BoundingBoxes(
@@ -100,12 +100,12 @@ class MothDataset(torch.utils.data.Dataset):
                     "iscrowd": 0,
                 }
                 annotations.append(annotation)
-        coco_data = {
+        coco_dict = {
             "categories": [{"id": i, "name": n} for i, n in bbox.id2label.items()],
             "images": images,
             "annotations": annotations,
         }
-        return coco_data
+        return coco_dict
 
     def to_coco_obj(self) -> COCO:
         coco_dataset = COCO()

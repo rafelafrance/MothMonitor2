@@ -5,6 +5,7 @@ import textwrap
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
+from pprint import pp
 
 import albumentations as alb
 import numpy as np
@@ -12,8 +13,10 @@ import torch
 from datasets import Dataset, Image, NamedSplit
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
 from transformers import (
-    AutoImageProcessor,
-    AutoModelForObjectDetection,
+    # AutoImageProcessor,
+    # AutoModelForObjectDetection,
+    DetrForObjectDetection,
+    DetrImageProcessor,
     Trainer,
     TrainingArguments,
 )
@@ -38,13 +41,7 @@ def train_action(args: argparse.Namespace) -> None:
     Modified from the Hugging Face website:
     https://huggingface.co/docs/transformers/tasks/object_detection
     """
-    image_processor = AutoImageProcessor.from_pretrained(
-        args.model_name,
-        do_resize=True,
-        size={"max_height": args.image_height, "max_width": args.image_width},
-        do_pad=True,
-        pad_size={"height": args.image_height, "width": args.image_width},
-    )
+    image_processor = DetrImageProcessor.from_pretrained(args.model_name)
     train_augment_and_transform = alb.Compose(
         [alb.HorizontalFlip(p=0.5), alb.VerticalFlip(p=0.5)],
         bbox_params=alb.BboxParams(
@@ -58,6 +55,7 @@ def train_action(args: argparse.Namespace) -> None:
 
     train_raw_data = get_dataset("train", args.train_json)
     valid_raw_data = get_dataset("validation", args.valid_json)
+    test_raw_data = get_dataset("test", args.test_json)
 
     train_transform_batch = partial(
         augment_and_transform_batch,
@@ -72,8 +70,9 @@ def train_action(args: argparse.Namespace) -> None:
 
     train_dataset = train_raw_data.with_transform(train_transform_batch)
     valid_dataset = valid_raw_data.with_transform(validation_transform_batch)
+    test_dataset = test_raw_data.with_transform(validation_transform_batch)
 
-    model = AutoModelForObjectDetection.from_pretrained(
+    model = DetrForObjectDetection.from_pretrained(
         args.model_name,
         id2label=bbox.id2label,
         label2id=bbox.label2id,
@@ -118,6 +117,9 @@ def train_action(args: argparse.Namespace) -> None:
     )
 
     trainer.train()
+
+    metrics = trainer.evaluate(eval_dataset=test_dataset, metric_key_prefix="test")
+    pp(metrics)
 
 
 def get_dataset(split: str, dataset_json: Path) -> Dataset:
@@ -178,7 +180,7 @@ def convert_bbox_yolo_to_pascal(
 def augment_and_transform_batch(
     examples: dict,
     transform: alb.Compose,
-    image_processor: AutoImageProcessor,
+    image_processor: DetrImageProcessor,
     *,
     return_pixel_mask: bool = False,
 ) -> list[dict]:
@@ -224,7 +226,7 @@ def collate_fn(batch: list[dict]) -> dict:
 @torch.no_grad()
 def compute_metrics(
     evaluation_results: tuple[list, list],
-    image_processor: AutoImageProcessor,
+    image_processor: DetrImageProcessor,
     threshold: float = 0.0,
     id2label: dict[int, str] | None = None,
 ) -> dict[str, float]:
@@ -330,7 +332,7 @@ def parse_args() -> argparse.Namespace:
 
     train_parser.add_argument(
         "--model-name",
-        default="IDEA-Research/dab-detr-resnet-50",
+        default="facebook/detr-resnet-50",
         metavar="MODEL",
         help="""Which model are we using. (default: %(default)s)""",
     )
@@ -349,6 +351,14 @@ def parse_args() -> argparse.Namespace:
         required=True,
         metavar="PATH",
         help="""JSON file containing validation data.""",
+    )
+
+    train_parser.add_argument(
+        "--test-json",
+        type=Path,
+        required=True,
+        metavar="PATH",
+        help="""JSON file containing holdout/test data.""",
     )
 
     train_parser.add_argument(
