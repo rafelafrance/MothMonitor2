@@ -8,8 +8,8 @@ FONT: tuple[str, int] = ("liberation sans", 16)
 FONT_SM: tuple[str, int] = ("liberation sans", 12)
 
 BBOX_FORMAT: dict[str, dict] = {
+    "bug": {"background": "blue", "foreground": "white", "font": FONT},
     "moth": {"background": "red", "foreground": "white", "font": FONT},
-    "not_moth": {"background": "blue", "foreground": "white", "font": FONT},
     "unsure": {"background": "green", "foreground": "white", "font": FONT},
     # {"background": "brown", "foreground": "white", "font": FONT},
     # {"background": "olive", "foreground": "white", "font": FONT},
@@ -25,10 +25,15 @@ BBOX_FORMAT: dict[str, dict] = {
     # {"background": "lavender", "font": FONT},
 }
 BBOX_COLOR: dict[str, str] = {k: v["background"] for k, v in BBOX_FORMAT.items()}
-BBOX_NUM_CLASSES: int = len(BBOX_FORMAT)
+BBOX_NUM_CLASSES: int = len(BBOX_FORMAT) + 1  # Plus one for the background
 
-id2label: dict[int, str] = dict(enumerate(BBOX_FORMAT))
+id2label: dict[int, str] = dict(enumerate(BBOX_FORMAT, 1))  # Skip background class
 label2id: dict[str, int] = {k: i for i, k in id2label.items()}
+
+
+def label_to_id(content: str, num_classes: int = BBOX_NUM_CLASSES) -> int:
+    lb = label2id[content]
+    return lb if lb <= num_classes else 1
 
 
 class BBox:
@@ -61,9 +66,8 @@ class BBox:
             id_=b["id_"],
         )
 
-    @property
-    def label(self) -> int:
-        return label2id[self.content]
+    def label(self, num_classes: int = BBOX_NUM_CLASSES) -> int:
+        return label_to_id(self.content, num_classes)
 
     @property
     def area(self) -> float:
@@ -117,8 +121,8 @@ class BBoxImage:
     def bboxes_as_xywh(self) -> list[list[int]]:
         return [b.xywh() for b in self.bboxes]
 
-    def bbox_labels(self) -> list[int]:
-        return [b.label for b in self.bboxes]
+    def bbox_labels(self, num_classes: int = BBOX_NUM_CLASSES) -> list[int]:
+        return [b.label(num_classes) for b in self.bboxes]
 
     def bbox_areas(self) -> list[float]:
         return [b.area for b in self.bboxes]

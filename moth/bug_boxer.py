@@ -2,7 +2,6 @@
 
 import json
 import tkinter as tk
-from dataclasses import asdict
 from pathlib import Path
 from tkinter import Event, filedialog, messagebox, ttk
 
@@ -83,6 +82,9 @@ class App(tk.Tk):
             font=bbox.FONT,
             command=self.load,
         )
+        self.save_label = ttk.Label(
+            self.control_frame, text="", font=bbox.FONT_SM, wraplength=300
+        )
         self.save_button = tk.Button(
             self.control_frame,
             text="Save",
@@ -95,7 +97,7 @@ class App(tk.Tk):
             font=bbox.FONT,
             command=self.save_as,
         )
-        self.file_label = ttk.Label(
+        self.image_label = ttk.Label(
             self.control_frame, text="", font=bbox.FONT_SM, wraplength=300
         )
         self.validate_cmd = (self.register(self.validate_spinner), "%P")
@@ -117,14 +119,15 @@ class App(tk.Tk):
 
         self.dir_button.grid(row=0, sticky="nsew", padx=16, pady=16)
         self.load_button.grid(row=1, sticky="nsew", padx=16, pady=16)
-        self.save_button.grid(row=2, sticky="nsew", padx=16, pady=16)
-        self.save_as_button.grid(row=3, sticky="nsew", padx=16, pady=16)
-        self.file_label.grid(row=4, sticky="nsew", padx=16, pady=16)
-        self.spinner.grid(row=5, sticky="nsew", padx=16, pady=16)
-        self.content_label.grid(row=6, sticky="ew", padx=16, pady=16)
+        self.save_label.grid(row=2, sticky="nsew", padx=16, pady=16)
+        self.save_button.grid(row=3, sticky="nsew", padx=16, pady=16)
+        self.save_as_button.grid(row=4, sticky="nsew", padx=16, pady=16)
+        self.image_label.grid(row=5, sticky="nsew", padx=16, pady=16)
+        self.spinner.grid(row=6, sticky="nsew", padx=16, pady=16)
+        self.content_label.grid(row=7, sticky="ew", padx=16, pady=16)
 
         style = ttk.Style(self)
-        for i, (content_value, opts) in enumerate(bbox.BBOX_FORMAT.items(), 7):
+        for i, (content_value, opts) in enumerate(bbox.BBOX_FORMAT.items(), 8):
             name = f"{content_value}.TRadiobutton"
             style.configure(name, **opts)
             radio = ttk.Radiobutton(
@@ -225,11 +228,11 @@ class App(tk.Tk):
             self.save_button.configure(state="disabled")
             self.save_as_button.configure(state="disabled")
             self.canvas.delete("all")
-            self.file_label.configure(text="")
+            self.image_label.configure(text="")
 
     def display_image(self) -> None:
         bbox_image: bbox.BBoxImage = self.get_image_rec()
-        self.file_label.configure(text=Path(bbox_image.path).name)
+        self.image_label.configure(text=Path(bbox_image.path).name)
         self.photo = ImageTk.PhotoImage(file=bbox_image.path)
         self.canvas.create_image(0, 0, anchor="nw", image=self.photo)
         self.canvas["scrollregion"] = (0, 0, bbox_image.width, bbox_image.height)
@@ -306,7 +309,7 @@ class App(tk.Tk):
         self.curr_dir = self.bbox_path.parent
         self.dirty = False
 
-        output = [asdict(i) for i in self.bbox_images]
+        output = [i.to_dict() for i in self.bbox_images]
 
         with self.bbox_path.open("w") as out_json:
             json.dump(output, out_json, indent=4)
@@ -325,6 +328,7 @@ class App(tk.Tk):
             return
 
         self.bbox_path = Path(bbox_path)
+        self.save_label.configure(text=self.bbox_path.name)
         self.save()
 
     def load(self) -> None:

@@ -59,6 +59,7 @@ select = ["ALL"]
 ignore = [
   "ANN401",  # Dynamically typed expressions (typing.Any) are disallowed
   "B905",    # zip() without an explicit strict= parameter
+  "C901",    # Function is too complex (x > 10)"
   "COM812",  # Trailing comma missing
   "D100",    # Missing docstring in public module
   "D101",    # Missing docstring in public class
@@ -77,11 +78,11 @@ ignore = [
   "G004",    # Logging statement uses f-string
   "LOG015",  # Use own logger instead
   "N818",    # Exception name {name} should be named with an Error suffix
-  "PTH207",  # Replace `glob` with `Path.glob` or `Path.rglob`
   "PLR0913", # Too many arguments in function definition ({c_args} > {max_args})
   "PLR0915", # Too many statements (> 50)
   "PLW2901", # Outer {outer_kind} variable {name} overwritten by inner {inner_kind} target
   "PT009",   # Use a regular assert instead of unittest-style {assertion}
+  "PTH207",  # Replace `glob` with `Path.glob` or `Path.rglob`
   "RET504",  # Unnecessary assignment to {name} before return statement
   "RUF001",  # Ambiguous quote character in string
   "RUF002",  # Docstring contains ambiguous `‘`

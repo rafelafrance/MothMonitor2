@@ -16,8 +16,11 @@ class MothDataset(torch.utils.data.Dataset):
         bbox_json: Path | None = None,
         bbox_images: list[bbox.BBoxImage] | None = None,
         transforms: v2.Compose | None = None,
+        num_classes: int = bbox.BBOX_NUM_CLASSES,
         limit: int | None = None,
     ) -> None:
+        self.num_classes = num_classes
+
         if bbox_json:
             self.bbox_images = bbox.load_json(bbox_json)
         elif bbox_images:
@@ -47,13 +50,17 @@ class MothDataset(torch.utils.data.Dataset):
                 canvas_size=image.size,
             )
 
+        labels = torch.as_tensor(
+            bbox_image.bbox_labels(self.num_classes), dtype=torch.int64
+        )
+
         if self.transforms is not None:
             image, target = self.transforms(image, bboxes)
 
         target = {
             "image_id": torch.as_tensor(bbox_image.image_id, dtype=torch.int64),
             "boxes": bboxes,
-            "labels": torch.as_tensor(bbox_image.bbox_labels(), dtype=torch.int64),
+            "labels": labels,
             "area": torch.as_tensor(bbox_image.bbox_areas(), dtype=torch.float32),
             "iscrowd": torch.zeros((len(bbox_image.bboxes),), dtype=torch.int64),
         }
@@ -94,7 +101,7 @@ class MothDataset(torch.utils.data.Dataset):
                 annotation = {
                     "id": box.id_,
                     "image_id": bbox_image.image_id,
-                    "category_id": bbox.label2id[box.content],
+                    "category_id": bbox.label_to_id(box.content),
                     "bbox": box.xywh(),
                     "area": box.area,
                     "iscrowd": 0,
